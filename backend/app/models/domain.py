@@ -1,7 +1,9 @@
 from enum import Enum
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+
+# Node labels and edge types match the vendored skills' Cypher output exactly.
 
 class NodeType(str, Enum):
     LECTURE = "Lecture"
@@ -9,65 +11,48 @@ class NodeType(str, Enum):
     TOPIC = "Topic"
     SUBTOPIC = "Subtopic"
     CONCEPT = "Concept"
-    REVIEW_QUESTION = "ReviewQuestion"
+    QUESTION = "Question"
 
 
 class EdgeType(str, Enum):
+    # hierarchy
     HAS_CHAPTER = "HAS_CHAPTER"
     HAS_TOPIC = "HAS_TOPIC"
     HAS_SUBTOPIC = "HAS_SUBTOPIC"
     HAS_CONCEPT = "HAS_CONCEPT"
-    RELATES_TO = "RELATES_TO"
-    REQUIRES = "REQUIRES"
-    HAS_REVIEW_QUESTION = "HAS_REVIEW_QUESTION"
-    TESTS_UNDERSTANDING_OF = "TESTS_UNDERSTANDING_OF"
+    # concept dependency edges
+    PREREQUISITE = "PREREQUISITE"
+    FACILITATOR = "FACILITATOR"
+    SAME_AS = "SAME_AS"
+    # review questions
+    HAS_QUESTION = "HAS_QUESTION"
+    TESTS = "TESTS"
 
 
-# ---------- Lecture ----------
+NODE_LABELS = [t.value for t in NodeType]
 
-class LectureCreate(BaseModel):
-    title: str
-    professor: str
-    description: str | None = None
-    semester: str | None = None
-
-
-class LectureUpdate(BaseModel):
-    title: str | None = None
-    professor: str | None = None
-    description: str | None = None
-    semester: str | None = None
-
-
-class LectureResponse(BaseModel):
-    id: str
-    title: str
-    professor: str
-    description: str | None = None
-    semester: str | None = None
+# Which edge points from a parent to this node type (used when creating a node
+# manually at a validation gate). TESTS is not a parent edge (Question->Concept).
+PARENT_EDGE: dict[NodeType, EdgeType] = {
+    NodeType.CHAPTER: EdgeType.HAS_CHAPTER,
+    NodeType.TOPIC: EdgeType.HAS_TOPIC,
+    NodeType.SUBTOPIC: EdgeType.HAS_SUBTOPIC,
+    NodeType.CONCEPT: EdgeType.HAS_CONCEPT,
+    NodeType.QUESTION: EdgeType.HAS_QUESTION,
+}
 
 
 # ---------- Node ----------
 
-class NodeProperties(BaseModel):
-    title: str | None = None
-    description: str | None = None
-    order: int | None = None
-    definition: str | None = None
-    examples: str | None = None
-    question: str | None = None
-    answer: str | None = None
-    difficulty: str | None = None
-
-
 class NodeCreate(BaseModel):
-    lecture_id: str
+    id: str
     node_type: NodeType
-    properties: NodeProperties
+    parent_id: str | None = None
+    properties: dict[str, Any] = {}
 
 
 class NodeUpdate(BaseModel):
-    properties: NodeProperties
+    properties: dict[str, Any]
 
 
 class NodeResponse(BaseModel):
@@ -90,7 +75,7 @@ class EdgeResponse(BaseModel):
     edge_type: EdgeType
 
 
-# ---------- Graph (für React Flow) ----------
+# ---------- Graph (for neovis.js / vis-network fallback) ----------
 
 class GraphNode(BaseModel):
     id: str
@@ -107,3 +92,13 @@ class GraphEdge(BaseModel):
 class GraphResponse(BaseModel):
     nodes: list[GraphNode]
     edges: list[GraphEdge]
+
+
+# ---------- Lecture summary (derived from staged Lecture nodes) ----------
+
+class LectureSummary(BaseModel):
+    id: str
+    code: str
+    name: str | None = None
+    prof: str | None = None
+    term: str | None = None

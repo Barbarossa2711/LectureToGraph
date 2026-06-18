@@ -1,0 +1,196 @@
+{
+  "lecture": {
+    "name": "Big-Data-Technologien",
+    "code": "BDT",
+    "degreeType": "Master",
+    "term": "2. Fachsemester",
+    "PO": "2019",
+    "prof": "Prof. Dr. Max Mustermann"
+  },
+  "chapter": {
+    "name": "Architekturen & Relationale Anfrageverarbeitung",
+    "index": 1
+  },
+  "topics": [
+    {
+      "name": "Begriffe im Umfeld von Datenbanksystemen und Big Data",
+      "index": 1,
+      "children": [
+        { "type": "concept", "name": "Informationssystem" },
+        { "type": "concept", "name": "Anwendungsprogramm" },
+        { "type": "concept", "name": "Datenbank-System (DBS)" },
+        { "type": "concept", "name": "Datenbank-Management-System (DBMS)" },
+        { "type": "concept", "name": "Datenbank (DB)" },
+        { "type": "concept", "name": "Unterschied DBMS & Daten-Management-Systeme" },
+        { "type": "concept", "name": "Datenunabhängigkeit" },
+        {
+          "type": "subtopic",
+          "name": "Motivation für den Einsatz",
+          "children": [
+            { "type": "concept", "name": "Datenverwaltung" },
+            { "type": "concept", "name": "Skalierbarkeit & Effizienz" },
+            { "type": "concept", "name": "Strukturierte Datenmodelle" },
+            { "type": "concept", "name": "Transaktionsmanagement" },
+            { "type": "concept", "name": "Datenschutz und Datensicherheit" }
+          ]
+        },
+        {
+          "type": "subtopic",
+          "name": "Datenmodellierung",
+          "children": [
+            { "type": "concept", "name": "Konzeptuelle Ebene" },
+            {
+              "type": "subtopic",
+              "name": "Logische Ebene",
+              "children": [
+                { "type": "concept", "name": "Relationales Datenmodell" },
+                { "type": "concept", "name": "Aggregat-orientiertes Datenmodell (XML/JSON)" }
+              ]
+            },
+            { "type": "concept", "name": "Physische Ebene" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Architekturen für Datenbank-Management-Systeme",
+      "index": 2,
+      "children": [
+        { "type": "concept", "name": "Client-Server-Architekturen" },
+        {
+          "type": "subtopic",
+          "name": "Skalierbarkeit",
+          "children": [
+            { "type": "concept", "name": "Vertikale Skalierung" },
+            { "type": "concept", "name": "Horizontale Skalierung" }
+          ]
+        },
+        { "type": "concept", "name": "Probleme verteilter DB-Systeme" }
+      ]
+    },
+    {
+      "name": "Big-Data-Architekturen",
+      "index": 3,
+      "children": [
+        {
+          "type": "subtopic",
+          "name": "Big Data",
+          "children": [
+            { "type": "concept", "name": "Volume" },
+            { "type": "concept", "name": "Velocity" },
+            { "type": "concept", "name": "Variety" }
+          ]
+        },
+        {
+          "type": "subtopic",
+          "name": "Lambda-Architektur",
+          "children": [
+            { "type": "concept", "name": "Batch-Layer" },
+            { "type": "concept", "name": "Speed-Layer" },
+            { "type": "concept", "name": "Serving-Layer" }
+          ]
+        },
+        {
+          "type": "subtopic",
+          "name": "Kappa-Architektur",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "Anfrageverarbeitung und Speicherstrukturen in einem DBMS",
+      "index": 4,
+      "children": [
+        { "type": "concept", "name": "Anfrageverarbeitung in relationalen DBMS" },
+        { "type": "concept", "name": "Blockweiser Festplattenzugriff" },
+        { "type": "concept", "name": "Kostenfunktion" },
+        {
+          "type": "subtopic",
+          "name": "Indexstrukturen",
+          "children": [
+            { "type": "concept", "name": "Primärindex" },
+            { "type": "concept", "name": "Sekundärindex" },
+            { "type": "concept", "name": "Clustered" },
+            { "type": "concept", "name": "Unclustered" },
+            { "type": "concept", "name": "Bäume (Mehrstufige Hierarchien)" },
+            { "type": "concept", "name": "Mehrweg-Suchbäume" },
+            { "type": "concept", "name": "B-Baum" },
+            { "type": "concept", "name": "B+-Baum" },
+            { "type": "concept", "name": "Heap-Datei (Haufen)" },
+            { "type": "concept", "name": "Sortierte Datei" },
+            { "type": "concept", "name": "Clustered Index" },
+            { "type": "concept", "name": "Unclustered Tree Index" },
+            { "type": "concept", "name": "Unclustered Hash Index" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Implementierung von Relationalen Operationen",
+      "index": 5,
+      "children": [
+        {
+          "type": "subtopic",
+          "name": "Sortieren",
+          "children": [
+            { "type": "concept", "name": "Zwei-Wege-Merge-Sort" },
+            { "type": "concept", "name": "Generelles Merge-Sort" }
+          ]
+        },
+        {
+          "type": "subtopic",
+          "name": "Join",
+          "children": [
+            { "type": "concept", "name": "Naive Implementierung" },
+            { "type": "concept", "name": "Block Nested Loop Join" },
+            { "type": "concept", "name": "Sort-Merge Join" },
+            { "type": "concept", "name": "Hash Join" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Anfrageoptimierung",
+      "index": 6,
+      "children": [
+        { "type": "concept", "name": "Optimierung auf logischer Ebene" },
+        { "type": "concept", "name": "Optimierung auf physischer Ebene" },
+        { "type": "concept", "name": "Inkrementelles Vorgehen" },
+        { "type": "concept", "name": "Aggregationen" },
+        { "type": "concept", "name": "Einfügen von zusätzlichen Gruppierungen" },
+        {
+          "type": "subtopic",
+          "name": "Vorgehen bei Optimierung",
+          "children": [
+            { "type": "concept", "name": "Reduktion des Suchraums (Heuristiken)" },
+            {
+              "type": "subtopic",
+              "name": "Dynamische Programmierung",
+              "children": [
+                { "type": "concept", "name": "Optimalitätsprinzip der Dynamischen Programmierung" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Weitere Methoden zur Optimierung von Anfragen",
+      "index": 7,
+      "children": [
+        { "type": "concept", "name": "Index-Only Queries" },
+        { "type": "concept", "name": "Materialized Views" },
+        {
+          "type": "subtopic",
+          "name": "Physische Optimierung in PostgreSQL",
+          "children": [
+            { "type": "concept", "name": "shared_buffers" },
+            { "type": "concept", "name": "effective_cache_size" },
+            { "type": "concept", "name": "work_mem" },
+            { "type": "concept", "name": "maintenance_work_mem" }
+          ]
+        }
+      ]
+    }
+  ]
+}

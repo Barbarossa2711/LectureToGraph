@@ -9,9 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@dagrejs/dagre": "^3.0.0",
-    "@xyflow/react": "^12.3.6",
     "axios": "^1.7.7",
+    "neovis.js": "^2.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.0"

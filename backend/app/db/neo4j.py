@@ -35,9 +35,10 @@ async def get_session():
 
 
 async def _create_constraints() -> None:
-    labels = ["Lecture", "Chapter", "Topic", "Subtopic", "Concept", "ReviewQuestion"]
+    labels = ["Lecture", "Chapter", "Topic", "Subtopic", "Concept", "Question"]
     async with get_driver().session() as session:
         for label in labels:
             await session.run(
-                f"CREATE CONSTRAINT ON (n:{label}) ASSERT n.id IS UNIQUE"
+                f"CREATE CONSTRAINT IF NOT EXISTS "
+                f"FOR (n:{label}) REQUIRE n.id IS UNIQUE"
             )

@@ -1,78 +1,113 @@
-import { useState } from 'react'
-import LectureList from './components/LectureList'
-import GraphEditor from './components/GraphEditor'
-import NodePanel from './components/NodePanel'
-import Toolbar, { type Tool } from './components/Toolbar'
-import { useGraphStore } from './store/graphStore'
+import { usePipelineStore } from './store/pipelineStore'
+import JobSetup from './components/JobSetup'
+import PipelineStepper from './components/PipelineStepper'
+import ProgressLog from './components/ProgressLog'
+import ExportButtons from './components/ExportButtons'
+import Neo4jUploadForm from './components/Neo4jUploadForm'
+import LanguageToggle from './components/LanguageToggle'
+import GraphView from './components/GraphView'
+import QuestionPanel from './components/QuestionPanel'
+import ValidationPanel from './components/ValidationPanel'
+import NextChapterPanel from './components/NextChapterPanel'
+import type { JobStatus } from './types/graph'
+
+const BANNERS: Partial<Record<JobStatus, { text: string; bg: string; color: string; spinner?: boolean }>> = {
+  RUNNING: { text: 'Das Modell arbeitet… (kann 1–2 Minuten dauern — siehe Verlauf links)', bg: '#dbeafe', color: '#1e40af', spinner: true },
+  AWAITING_USER_INPUT: { text: '❓ Rückfrage der KI — bitte rechts beantworten', bg: '#fef3c7', color: '#92400e' },
+  AWAITING_VALIDATION: { text: '✅ Schritt fertig — Graph prüfen und rechts freigeben', bg: '#ede9fe', color: '#5b21b6' },
+  AWAITING_NEXT_CHAPTER: { text: '📖 Kapitel fertig — weiteres Kapitel hinzufügen oder abschließen (rechts)', bg: '#e0f2fe', color: '#075985' },
+  COMPLETED: { text: '🎉 Pipeline abgeschlossen — Cypher links exportierbar', bg: '#dcfce7', color: '#166534' },
+  FAILED: { text: '⚠️ Fehler — Details links im Status', bg: '#fee2e2', color: '#991b1b' },
+}
+
+function Hourglass() {
+  return (
+    <span style={{
+      display: 'inline-block', animation: 'hourglassFlip 1.4s ease-in-out infinite',
+      transformOrigin: '50% 50%', fontSize: 15, lineHeight: 1,
+    }}>
+      ⏳
+    </span>
+  )
+}
+
+function StatusBanner({ status }: { status: JobStatus }) {
+  const b = BANNERS[status]
+  if (!b) return null
+  return (
+    <div style={{
+      position: 'absolute', top: 12, left: 12,
+      display: 'inline-flex', alignItems: 'center', gap: 8,
+      padding: '8px 16px', borderRadius: 999, background: b.bg, color: b.color,
+      fontSize: 13, fontWeight: 600, boxShadow: '0 1px 4px rgba(0,0,0,0.1)', zIndex: 10,
+    }}>
+      {b.spinner && <Hourglass />}
+      {b.text}
+    </div>
+  )
+}
 
 export default function App() {
-  const { activeLecture, selectedNodeId, setSelectedNode } = useGraphStore()
-  const [activeTool, setActiveTool] = useState<Tool>('select')
-  const [layoutTrigger, setLayoutTrigger] = useState(0)
+  const { job, vizReloadKey, setJob } = usePipelineStore()
 
-  const handleNodeSelect = (id: string | null) => {
-    setSelectedNode(id)
-  }
-
-  const handleToolChange = (tool: Tool) => {
-    setActiveTool(tool)
-    if (tool !== 'select') setSelectedNode(null)
-  }
+  const showQuestion = job?.status === 'AWAITING_USER_INPUT' && job.pending_question
+  const showValidation = job?.status === 'AWAITING_VALIDATION' || job?.status === 'COMPLETED'
+  const showNextChapter = job?.status === 'AWAITING_NEXT_CHAPTER'
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <LectureList />
+    <div style={{ display: 'flex', height: '100vh', fontFamily: 'system-ui, sans-serif', color: '#0f172a' }}>
+      <style>{`
+        @keyframes hourglassFlip {
+          0%, 55%  { transform: rotate(0deg); }
+          70%, 100% { transform: rotate(180deg); }
+        }
+      `}</style>
+      {/* Left: setup / pipeline */}
+      <aside style={{ width: 320, borderRight: '1px solid #e2e8f0', padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>LectureToGraph</div>
+        {!job ? (
+          <JobSetup />
+        ) : (
+          <>
+            <PipelineStepper job={job} />
+            <LanguageToggle job={job} />
+            <ProgressLog />
+            <ExportButtons job={job} />
+            {job.status === 'COMPLETED' && <Neo4jUploadForm job={job} />}
+            <button onClick={() => setJob(null)} style={{
+              marginTop: 'auto', padding: '8px 0', borderRadius: 6, cursor: 'pointer',
+              border: '1px solid #e2e8f0', background: '#fff', fontSize: 12, color: '#64748b',
+            }}>
+              Neuer Job
+            </button>
+          </>
+        )}
+      </aside>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Header */}
-        <div style={{
-          height: 44, borderBottom: '1px solid #e5e7eb',
-          display: 'flex', alignItems: 'center', padding: '0 16px', gap: 10,
-          background: '#fff', flexShrink: 0,
-        }}>
-          {activeLecture ? (
-            <>
-              <span style={{ fontWeight: 700, fontSize: 15 }}>{activeLecture.title}</span>
-              <span style={{ color: '#6b7280', fontSize: 13 }}>{activeLecture.professor}</span>
-              {activeLecture.semester && (
-                <span style={{ color: '#9ca3af', fontSize: 12 }}>· {activeLecture.semester}</span>
-              )}
-            </>
-          ) : (
-            <span style={{ color: '#9ca3af', fontSize: 13 }}>
-              Wähle eine Vorlesung aus der linken Leiste
-            </span>
-          )}
-        </div>
+      {/* Center: graph */}
+      <main style={{ flex: 1, position: 'relative' }}>
+        {job ? (
+          <>
+            <GraphView jobId={job.id} reloadKey={vizReloadKey} />
+            <StatusBanner status={job.status} />
+          </>
+        ) : (
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1', fontSize: 18 }}>
+            Lade PDF(s) hoch und starte den KI-Modus
+          </div>
+        )}
+      </main>
 
-        {/* Toolbar */}
-        <Toolbar
-          activeTool={activeTool}
-          onChange={handleToolChange}
-          onResetLayout={() => setLayoutTrigger((n) => n + 1)}
-          disabled={!activeLecture}
-        />
-
-        {/* Canvas + side panel */}
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-          {activeLecture ? (
-            <GraphEditor
-              activeTool={activeTool}
-              onNodeSelect={handleNodeSelect}
-              onResetLayout={() => setLayoutTrigger((n) => n + 1)}
-              layoutTrigger={layoutTrigger}
-            />
-          ) : (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d1d5db', fontSize: 18 }}>
-              Kein Graph geladen
-            </div>
-          )}
-
-          {selectedNodeId && activeTool === 'select' && (
-            <NodePanel onClose={() => setSelectedNode(null)} />
-          )}
-        </div>
-      </div>
+      {/* Right: question / validation / next chapter */}
+      {job && (showQuestion || showValidation || showNextChapter) && (
+        <aside style={{ width: 340, borderLeft: '1px solid #e2e8f0', padding: 16, overflowY: 'auto', background: '#fafafa' }}>
+          {showQuestion
+            ? <QuestionPanel jobId={job.id} payload={job.pending_question!} />
+            : showNextChapter
+              ? <NextChapterPanel job={job} />
+              : <ValidationPanel job={job} />}
+        </aside>
+      )}
     </div>
   )
 }
