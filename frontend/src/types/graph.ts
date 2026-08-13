@@ -5,6 +5,7 @@ export type NodeType =
   | 'Subtopic'
   | 'Concept'
   | 'Question'
+  | 'Slide'
 
 export type EdgeType =
   | 'HAS_CHAPTER'
@@ -16,6 +17,7 @@ export type EdgeType =
   | 'SAME_AS'
   | 'HAS_QUESTION'
   | 'TESTS'
+  | 'COVERS'
 
 export type Stage = 'DOMAIN' | 'EDGES' | 'QUESTIONS'
 
@@ -94,7 +96,7 @@ export interface VizConfig {
 }
 
 export const STAGES: { key: Stage; label: string }[] = [
-  { key: 'DOMAIN', label: 'Domain-Modell' },
+  { key: 'DOMAIN', label: 'Domain-Modell + Folien' },
   { key: 'EDGES', label: 'Konzept-Kanten' },
   { key: 'QUESTIONS', label: 'Wiederholungsfragen' },
 ]
@@ -106,6 +108,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   Subtopic: 'Unterthema',
   Concept: 'Konzept',
   Question: 'Frage',
+  Slide: 'Folie',
 }
 
 export const EDGE_TYPE_LABELS: Record<EdgeType, string> = {
@@ -118,6 +121,7 @@ export const EDGE_TYPE_LABELS: Record<EdgeType, string> = {
   SAME_AS: 'gleich wie',
   HAS_QUESTION: 'hat Frage',
   TESTS: 'testet',
+  COVERS: 'behandelt',
 }
 
 export const NODE_COLORS: Record<NodeType, string> = {
@@ -127,9 +131,10 @@ export const NODE_COLORS: Record<NodeType, string> = {
   Subtopic: '#f59e0b',
   Concept: '#ef4444',
   Question: '#a855f7',
+  Slide: '#475569',
 }
 
-// node size decreases gently down the hierarchy; questions are smallest
+// node size decreases gently down the hierarchy; questions/slides are smallest
 export const NODE_SIZES: Record<NodeType, number> = {
   Lecture: 24,
   Chapter: 21,
@@ -137,6 +142,7 @@ export const NODE_SIZES: Record<NodeType, number> = {
   Subtopic: 17,
   Concept: 15,
   Question: 12,
+  Slide: 12,
 }
 
 // distinct colour per edge type; PREREQUISITE is emphasised (see GraphView)
@@ -150,10 +156,11 @@ export const EDGE_COLORS: Record<EdgeType, string> = {
   SAME_AS: '#14b8a6',
   HAS_QUESTION: '#c084fc',
   TESTS: '#ec4899',
+  COVERS: '#0891b2',
 }
 
-export const NODE_TYPES: NodeType[] = ['Lecture', 'Chapter', 'Topic', 'Subtopic', 'Concept', 'Question']
+export const NODE_TYPES: NodeType[] = ['Lecture', 'Chapter', 'Topic', 'Subtopic', 'Concept', 'Question', 'Slide']
 export const EDGE_TYPES: EdgeType[] = [
   'HAS_CHAPTER', 'HAS_TOPIC', 'HAS_SUBTOPIC', 'HAS_CONCEPT',
-  'PREREQUISITE', 'FACILITATOR', 'SAME_AS', 'HAS_QUESTION', 'TESTS',
+  'PREREQUISITE', 'FACILITATOR', 'SAME_AS', 'HAS_QUESTION', 'TESTS', 'COVERS',
 ]

@@ -175,3 +175,66 @@ Concept   <PARENT>_C<nn>         BDT_CH01_T01_S02_C01
   node; bump `chapter.index` per deck.
 - Keep one `.structure.json` per chapter; they are easy to diff and edit.
 - See `examples/bdt_kapitel1.structure.json` for a complete reference input.
+
+---
+
+## Step 3 — Slides (presentation layer, same step)
+
+After the structural Cypher is generated, add the chapter's **slides** as `:Slide` nodes in the
+**same** step and link each slide to the concept(s) it presents. The concept graph above was derived
+from these very slides, so a source slide exists for every concept.
+
+### Model
+
+```
+(:Slide)-[:COVERS]->(:Concept)        // this slide presents this concept (0..n)
+```
+
+A `:Slide` node has exactly these eight properties:
+
+| property      | type   | example                                              |
+| ------------- | ------ | ---------------------------------------------------- |
+| `id`          | string | `BDT_CH06_SL34`  (`<CODE>_CHNN_SL<pageNumber>`)       |
+| `title`       | string | `Topics und Partitionen im Cluster (mehrere Broker)` |
+| `pageNumber`  | int    | `34`                                                 |
+| `source`      | string | `06-data-streams.pdf`                                |
+| `lecture`     | string | `BDT`                                                |
+| `chapter`     | string | `BDT_CH06`                                            |
+| `chapterIndex`| int    | `6`                                                  |
+| `chapterName` | string | `Data Streams & Zeitreihen`                          |
+
+### COVERS rules
+
+- A content slide may cover **several** concepts or exactly one. **Do not create a `:Slide` node for
+  content-less slides** — table of contents, agenda, section dividers, pure recap/Wiederholungsfragen,
+  or image-only slides. Only create a `:Slide` if it presents at least one concept (≥ 1 COVERS edge);
+  any free-standing slide without a COVERS edge is removed automatically.
+- **Hard requirement — every concept must originate from a slide:** each `:Concept` of the chapter
+  must be the target of **at least one** COVERS edge. No concept may be left without a source slide.
+- One physical slide page = exactly **one** `:Slide` node, belonging to exactly one chapter. When
+  adding a later chapter, do NOT recreate a page that already exists (reuse its exact id); only
+  create slides for the pages of the chapter you are building now.
+
+### Write the slides Cypher
+
+Write a separate file `<name>_slides.cypher` (the agent writes this by hand — there is no generator).
+EVERY property MUST be prefixed with `s.`; every statement ends with `;`:
+
+```cypher
+CREATE CONSTRAINT IF NOT EXISTS FOR (s:Slide) REQUIRE s.id IS UNIQUE;
+MERGE (s:Slide {id:'BDT_CH06_SL34'})
+  SET s.title='Topics und Partitionen im Cluster (mehrere Broker)',
+      s.pageNumber=34, s.source='06-data-streams.pdf', s.lecture='BDT',
+      s.chapter='BDT_CH06', s.chapterIndex=6, s.chapterName='Data Streams & Zeitreihen';
+MATCH (s:Slide {id:'BDT_CH06_SL34'}), (c:Concept {id:'BDT_CH06_T01_C01'}) MERGE (s)-[:COVERS]->(c);
+```
+
+### Verify the slides
+
+```bash
+python scripts/verify_slides.py --domain "<name>.cypher" --slides "<name>_slides.cypher"
+```
+
+Hard checks (must pass): unique slide ids, every COVERS target is a defined `:Concept`, every slide
+carries the eight properties, and **every chapter `:Concept` is covered by ≥ 1 slide**. Slides
+without a COVERS edge are reported as INFO.

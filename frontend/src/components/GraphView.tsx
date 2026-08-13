@@ -1,15 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import NeoVis, { NEOVIS_ADVANCED_CONFIG } from 'neovis.js'
 import { getVizConfig } from '../api/client'
-import { NODE_COLORS, NODE_SIZES, EDGE_COLORS, EDGE_TYPES } from '../types/graph'
-import type { EdgeType, Stage } from '../types/graph'
+import {
+  NODE_COLORS, NODE_SIZES, NODE_TYPES, NODE_TYPE_LABELS,
+  EDGE_COLORS, EDGE_TYPES, EDGE_TYPE_LABELS,
+} from '../types/graph'
+import type { EdgeType, NodeType, Stage } from '../types/graph'
 import NodeInfoPopup, { type SelectedNode } from './NodeInfoPopup'
 
 const STAGE_LAST_LABEL: Record<Stage, string> = {
-  DOMAIN: 'Kapitel',
+  DOMAIN: 'Kapitel + Folien',
   EDGES: 'Konzept-Kanten',
   QUESTIONS: 'Wiederholungsfragen',
 }
+
+// node depth for the hierarchical layout (only the lecture STRUCTURE drives the
+// arrangement; semantic edges PREREQUISITE/FACILITATOR/TESTS do not — see below)
+const NODE_LEVELS: Record<NodeType, number> = {
+  Lecture: 0, Chapter: 1, Topic: 2, Subtopic: 3, Concept: 4, Question: 5, Slide: 6,
+}
+
+const CHAPTER_RE = /^([A-Za-z0-9]+_CH\d+)/
 
 interface Props {
   jobId: string
@@ -32,10 +43,23 @@ function extractNodeProps(item: any): Record<string, unknown> {
   return out
 }
 
-// The semantic concept/question edges describe meaning, not the structural
-// hierarchy — they clutter the tree, so they're excluded from physics (physics:
-// false) and can be hidden entirely via the toggle.
-const SEMANTIC_EDGES = new Set<EdgeType>(['PREREQUISITE', 'FACILITATOR', 'SAME_AS', 'TESTS'])
+function nodeLabelOf(item: any): string {
+  return item?.raw?.labels?.[0] ?? item?.group ?? ''
+}
+
+function nodeIdOf(item: any): string {
+  return String(item?.raw?.properties?.id ?? item?.id ?? '')
+}
+
+function chapterPrefixOf(id: string): string | null {
+  const m = CHAPTER_RE.exec(id)
+  return m ? m[1] : null
+}
+
+// The semantic concept/question/slide edges describe meaning, not the structural
+// hierarchy — they're excluded from physics (physics: false) so they don't distort
+// the tree layout. Visibility is controlled per-type via the filter panel.
+const SEMANTIC_EDGES = new Set<EdgeType>(['PREREQUISITE', 'FACILITATOR', 'SAME_AS', 'TESTS', 'COVERS'])
 
 // width / dashes / show-label / physics per edge type
 const EDGE_STYLE: Record<EdgeType, { width: number; dashes?: boolean; label?: boolean; physics?: boolean }> = {
@@ -48,14 +72,24 @@ const EDGE_STYLE: Record<EdgeType, { width: number; dashes?: boolean; label?: bo
   SAME_AS: { width: 2, dashes: true, label: true, physics: false },
   HAS_QUESTION: { width: 1.5 },
   TESTS: { width: 2, dashes: true, label: true, physics: false },
+  COVERS: { width: 1, dashes: true },
 }
 
-function applyEdgeVisibility(net: any, hide: boolean): void {
+function applyNodeVisibility(net: any, hiddenTypes: Set<string>, hiddenChapters: Set<string>): void {
+  const ds = net?.body?.data?.nodes
+  if (!ds) return
+  const updates = ds.get().map((nd: any) => {
+    const cp = chapterPrefixOf(nodeIdOf(nd))
+    const hidden = hiddenTypes.has(nodeLabelOf(nd)) || (cp != null && hiddenChapters.has(cp))
+    return { id: nd.id, hidden }
+  })
+  if (updates.length) ds.update(updates)
+}
+
+function applyEdgeVisibility(net: any, hidden: Set<string>): void {
   const ds = net?.body?.data?.edges
   if (!ds) return
-  const updates = ds.get()
-    .filter((e: any) => SEMANTIC_EDGES.has(e.raw?.type))
-    .map((e: any) => ({ id: e.id, hidden: hide }))
+  const updates = ds.get().map((e: any) => ({ id: e.id, hidden: hidden.has(e.raw?.type) }))
   if (updates.length) ds.update(updates)
 }
 
@@ -63,19 +97,56 @@ export default function GraphView({ jobId, reloadKey }: Props) {
   const vizRef = useRef<any>(null)
   const netRef = useRef<any>(null)
   const [selected, setSelected] = useState<SelectedNode | null>(null)
-  const [hideSemantic, setHideSemantic] = useState(false)
-  const hideRef = useRef(hideSemantic)
+
+  // per-type / per-chapter visibility filters (a key in the set is HIDDEN)
+  const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
+  const [hiddenEdges, setHiddenEdges] = useState<Set<string>>(new Set())
+  const [hiddenChapters, setHiddenChapters] = useState<Set<string>>(new Set())
+  const hiddenNodesRef = useRef(hiddenNodes)
+  const hiddenEdgesRef = useRef(hiddenEdges)
+  const hiddenChaptersRef = useRef(hiddenChapters)
+  const [chapters, setChapters] = useState<{ id: string; name: string; index: number }[]>([])
+  const [filterOpen, setFilterOpen] = useState(false)
+
+  // layout mode (force-directed vs. hierarchical tree)
+  const [hierarchical, setHierarchical] = useState(false)
+
   // "only latest changes" scoped view
   const cfgRef = useRef<{ full: string; last: string | null }>({ full: '', last: null })
   const [lastOnly, setLastOnly] = useState(false)
   const lastOnlyRef = useRef(false)
   const [lastStage, setLastStage] = useState<Stage | null>(null)
 
-  // re-apply visibility whenever the toggle flips
+  // re-apply visibility whenever a filter flips
   useEffect(() => {
-    hideRef.current = hideSemantic
-    applyEdgeVisibility(netRef.current, hideSemantic)
-  }, [hideSemantic])
+    hiddenNodesRef.current = hiddenNodes
+    applyNodeVisibility(netRef.current, hiddenNodes, hiddenChaptersRef.current)
+  }, [hiddenNodes])
+  useEffect(() => {
+    hiddenChaptersRef.current = hiddenChapters
+    applyNodeVisibility(netRef.current, hiddenNodesRef.current, hiddenChapters)
+  }, [hiddenChapters])
+  useEffect(() => {
+    hiddenEdgesRef.current = hiddenEdges
+    applyEdgeVisibility(netRef.current, hiddenEdges)
+  }, [hiddenEdges])
+
+  const toggleInSet = (setter: typeof setHiddenNodes, t: string) =>
+    setter((prev) => {
+      const n = new Set(prev)
+      if (n.has(t)) n.delete(t); else n.add(t)
+      return n
+    })
+  const toggleNodeType = (t: string) => toggleInSet(setHiddenNodes, t)
+  const toggleEdgeType = (t: string) => toggleInSet(setHiddenEdges, t)
+  const toggleChapter = (id: string) => toggleInSet(setHiddenChapters, id)
+
+  const hideAllSemantic = () => setHiddenEdges(new Set<string>(SEMANTIC_EDGES))
+  const resetFilters = () => {
+    setHiddenNodes(new Set())
+    setHiddenEdges(new Set())
+    setHiddenChapters(new Set())
+  }
 
   const toggleLastOnly = (v: boolean) => {
     setLastOnly(v)
@@ -114,6 +185,17 @@ export default function GraphView({ jobId, reloadKey }: Props) {
         }
       }
 
+      const groups = Object.fromEntries(
+        NODE_TYPES.map((label) => [
+          label,
+          {
+            color: { background: NODE_COLORS[label], border: NODE_COLORS[label] },
+            size: NODE_SIZES[label],
+            ...(hierarchical ? { level: NODE_LEVELS[label] } : {}),
+          },
+        ]),
+      )
+
       const config: any = {
         containerId: CONTAINER_ID,
         neo4j: {
@@ -131,18 +213,23 @@ export default function GraphView({ jobId, reloadKey }: Props) {
           },
           edges: {
             arrows: { to: { enabled: true, scaleFactor: 0.6 } },
-            smooth: { enabled: true, type: 'dynamic' },
+            smooth: hierarchical
+              ? { enabled: true, type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 }
+              : { enabled: true, type: 'dynamic' },
           },
-          groups: Object.fromEntries(
-            Object.entries(NODE_COLORS).map(([label, color]) => [
-              label,
-              {
-                color: { background: color, border: color },
-                size: NODE_SIZES[label as keyof typeof NODE_SIZES],
-              },
-            ]),
-          ),
-          physics: { stabilization: { iterations: 150 } },
+          groups,
+          // hierarchical layout: levels (above) drive the arrangement, physics off
+          // so the semantic edges (PREREQUISITE/FACILITATOR/TESTS) don't move nodes
+          physics: hierarchical ? { enabled: false } : { stabilization: { iterations: 150 } },
+          layout: hierarchical
+            ? {
+                hierarchical: {
+                  enabled: true, direction: 'UD', sortMethod: 'directed',
+                  levelSeparation: 120, nodeSpacing: 80, treeSpacing: 110,
+                  blockShifting: true, edgeMinimization: true, parentCentralization: true,
+                },
+              }
+            : { hierarchical: { enabled: false } },
         },
         labels: {
           Lecture: { label: 'name' },
@@ -151,6 +238,7 @@ export default function GraphView({ jobId, reloadKey }: Props) {
           Subtopic: { label: 'name' },
           Concept: { label: 'name' },
           Question: { label: 'text' },
+          Slide: { label: 'title' },
         },
         relationships,
         initialCypher: startCypher,
@@ -161,12 +249,28 @@ export default function GraphView({ jobId, reloadKey }: Props) {
         vizRef.current = viz
         viz.render()
 
-        // once the graph is drawn, wire right-click on a node -> attribute popup
+        // once the graph is (re)drawn, re-apply filters, collect chapters, wire right-click
         viz.registerOnEvent?.('completed', () => {
           const net = viz.network
           if (!net) return
           netRef.current = net
-          applyEdgeVisibility(net, hideRef.current)
+          applyNodeVisibility(net, hiddenNodesRef.current, hiddenChaptersRef.current)
+          applyEdgeVisibility(net, hiddenEdgesRef.current)
+
+          // build the chapter list from the Chapter nodes currently in the graph
+          const chs: { id: string; name: string; index: number }[] = []
+          for (const nd of net.body.data.nodes.get()) {
+            if (nodeLabelOf(nd) !== 'Chapter') continue
+            const props: any = nd.raw?.properties ?? {}
+            chs.push({
+              id: String(props.id ?? ''),
+              name: String(props.name ?? props.id ?? ''),
+              index: Number(props.index ?? 0),
+            })
+          }
+          chs.sort((a, b) => a.index - b.index)
+          setChapters(chs)
+
           if (net.__ctxBound) return
           net.__ctxBound = true
           net.on('oncontext', (params: any) => {
@@ -175,7 +279,7 @@ export default function GraphView({ jobId, reloadKey }: Props) {
             if (nodeId == null) { setSelected(null); return }
             const item = net.body.data.nodes.get(nodeId)
             const props = extractNodeProps(item)
-            const lbl = item?.raw?.labels?.[0] ?? item?.group ?? ''
+            const lbl = nodeLabelOf(item)
             // pointer.DOM is relative to the graph container, which fills <main>
             // (the positioned ancestor the popup is absolutely placed against)
             setSelected({
@@ -198,7 +302,7 @@ export default function GraphView({ jobId, reloadKey }: Props) {
       cancelled = true
       try { vizRef.current?.clearNetwork?.() } catch { /* ignore */ }
     }
-  }, [jobId, reloadKey])
+  }, [jobId, reloadKey, hierarchical])
 
   return (
     <>
@@ -210,6 +314,55 @@ export default function GraphView({ jobId, reloadKey }: Props) {
         position: 'absolute', bottom: 12, left: 12, zIndex: 20,
         display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start',
       }}>
+        {filterOpen && (
+          <div style={panel}>
+            <div style={panelHead}>
+              <span>Ansicht filtern</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button style={miniBtn} onClick={resetFilters}>Zurücksetzen</button>
+                <button style={miniBtn} onClick={hideAllSemantic}>Nur Struktur</button>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div>
+                <div style={colHead}>Knoten</div>
+                {NODE_TYPES.map((t: NodeType) => (
+                  <label key={t} style={row}>
+                    <input type="checkbox" checked={!hiddenNodes.has(t)}
+                      onChange={() => toggleNodeType(t)} />
+                    <span style={{ ...dot, background: NODE_COLORS[t] }} />
+                    {NODE_TYPE_LABELS[t]}
+                  </label>
+                ))}
+              </div>
+              <div>
+                <div style={colHead}>Kanten</div>
+                {EDGE_TYPES.map((t: EdgeType) => (
+                  <label key={t} style={row}>
+                    <input type="checkbox" checked={!hiddenEdges.has(t)}
+                      onChange={() => toggleEdgeType(t)} />
+                    <span style={{ ...dot, background: EDGE_COLORS[t] }} />
+                    {EDGE_TYPE_LABELS[t]}
+                  </label>
+                ))}
+              </div>
+            </div>
+            {chapters.length > 1 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={colHead}>Kapitel</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
+                  {chapters.map((c) => (
+                    <label key={c.id} style={row}>
+                      <input type="checkbox" checked={!hiddenChapters.has(c.id)}
+                        onChange={() => toggleChapter(c.id)} />
+                      {c.index ? `${c.index}. ` : ''}{c.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {lastStage && (
           <label style={ctrl}>
             <input type="checkbox" checked={lastOnly}
@@ -218,10 +371,15 @@ export default function GraphView({ jobId, reloadKey }: Props) {
           </label>
         )}
         <label style={ctrl}>
-          <input type="checkbox" checked={hideSemantic}
-            onChange={(e) => setHideSemantic(e.target.checked)} />
-          Nur Struktur (Konzept-/Fragen-Kanten ausblenden)
+          <input type="checkbox" checked={hierarchical}
+            onChange={(e) => setHierarchical(e.target.checked)} />
+          Hierarchisches Layout
         </label>
+        <button style={{ ...ctrl, cursor: 'pointer' }} onClick={() => setFilterOpen((o) => !o)}>
+          🔍 Filter {filterOpen ? '▾' : '▸'}
+          {(hiddenNodes.size + hiddenEdges.size + hiddenChapters.size) > 0 &&
+            ` · ${hiddenNodes.size + hiddenEdges.size + hiddenChapters.size} ausgeblendet`}
+        </button>
       </div>
       {selected && (
         <NodeInfoPopup node={selected} onClose={() => setSelected(null)} />
@@ -231,8 +389,38 @@ export default function GraphView({ jobId, reloadKey }: Props) {
 }
 
 const ctrl: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', gap: 6,
   background: '#fff', padding: '6px 10px', borderRadius: 999,
   border: '1px solid #e2e8f0', boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
   fontSize: 12, color: '#334155', fontWeight: 600,
+}
+
+const panel: React.CSSProperties = {
+  background: '#fff', padding: '10px 12px', borderRadius: 10,
+  border: '1px solid #e2e8f0', boxShadow: '0 2px 10px rgba(0,0,0,0.12)',
+  fontSize: 12, color: '#334155', maxHeight: '60vh', overflowY: 'auto',
+}
+
+const panelHead: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  gap: 12, fontWeight: 700, marginBottom: 8,
+}
+
+const colHead: React.CSSProperties = {
+  fontWeight: 700, fontSize: 11, color: '#64748b',
+  textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4,
+}
+
+const row: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+  padding: '2px 0', whiteSpace: 'nowrap',
+}
+
+const dot: React.CSSProperties = {
+  width: 10, height: 10, borderRadius: 3, display: 'inline-block', flexShrink: 0,
+}
+
+const miniBtn: React.CSSProperties = {
+  cursor: 'pointer', fontSize: 11, fontWeight: 600, color: '#475569',
+  background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 6, padding: '2px 8px',
 }

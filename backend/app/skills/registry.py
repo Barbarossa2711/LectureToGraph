@@ -39,7 +39,7 @@ STAGE_SKILLS: dict[Stage, SkillDef] = {
     Stage.DOMAIN: SkillDef(
         name="lecture-domain-model",
         skill_dir=SKILLS_DIR / "lecture-domain-model",
-        allowed_scripts=frozenset({"json_to_cypher.py"}),
+        allowed_scripts=frozenset({"json_to_cypher.py", "verify_slides.py"}),
     ),
     Stage.EDGES: SkillDef(
         name="lecture-concept-edges",

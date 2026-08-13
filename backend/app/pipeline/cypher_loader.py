@@ -179,6 +179,22 @@ async def delete_questions_in_chapter(code: str, chapter_no: int) -> None:
         )
 
 
+async def delete_orphan_slides_in_chapter(code: str, chapter_no: int) -> int:
+    """Remove this chapter's content-less slides — :Slide nodes that cover no
+    concept (no outgoing COVERS edge), e.g. table-of-contents / agenda / divider
+    slides. Returns how many were deleted."""
+    pref = chapter_prefix(code, chapter_no)
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (s:Slide) WHERE s.id STARTS WITH $pref AND NOT (s)-[:COVERS]->() "
+            "DETACH DELETE s RETURN count(s) AS n",
+            pref=pref,
+        )
+        rec = await result.single()
+        return int(rec["n"]) if rec else 0
+
+
 def last_change_cypher(code: str, stage: str, chapter_no: int) -> str:
     """A scoped query returning ONLY what the given stage added for this chapter
     (plus the endpoints of new edges), for the 'show only latest changes' view."""
@@ -197,7 +213,8 @@ def last_change_cypher(code: str, stage: str, chapter_no: int) -> str:
             f"OPTIONAL MATCH (q)-[t:TESTS]->(con) "
             f"RETURN q, hq, c, t, con"
         )
-    # DOMAIN (or default): the chapter subtree
+    # DOMAIN (or default): the chapter subtree (now includes this chapter's Slide
+    # nodes and COVERS edges, since their ids share the chapter prefix)
     return (
         f"MATCH (n) WHERE n.id STARTS WITH '{pref}' "
         f"OPTIONAL MATCH (n)-[r]->(m) WHERE m.id STARTS WITH '{pref}' "
@@ -251,6 +268,103 @@ async def export_full_graph_cypher(code: str) -> str:
             lines.append(
                 "MATCH (a {{id:'{s}'}}), (b {{id:'{o}'}}) MERGE (a)-[:{t}]->(b);".format(
                     s=_esc(rec["s"]), o=_esc(rec["o"]), t=rec["t"]))
+    return "\n".join(lines) + "\n"
+
+
+_CONSTRAINT_LABELS = ["Lecture", "Chapter", "Topic", "Subtopic", "Concept", "Question", "Slide"]
+
+
+async def export_chapter_cypher(code: str, chapter_no: int) -> str:
+    """Serialize EVERYTHING belonging to one chapter into a single, self-contained
+    idempotent .cypher file: the Lecture node, the chapter subtree (Chapter/Topic/
+    Subtopic/Concept/Question/Slide), and every relationship originating in the
+    chapter (HAS_*, PREREQUISITE/FACILITATOR/SAME_AS, TESTS, COVERS). This is the
+    consolidated 'one file per chapter' output — a merge of the per-stage files,
+    read back from Neo4j so it also reflects manual edits."""
+    pref = chapter_prefix(code, chapter_no)
+    driver = get_driver()
+    lines = [
+        f"// Consolidated export of chapter {chapter_no} ({pref}) — single file per chapter.",
+        "// Idempotent (MERGE) and self-contained: includes the Lecture node + HAS_CHAPTER.",
+        "",
+        "// --- Constraints ---",
+    ]
+    for label in _CONSTRAINT_LABELS:
+        lines.append(
+            f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS "
+            f"FOR (n:{label}) REQUIRE n.id IS UNIQUE;"
+        )
+    lines.append("")
+    async with driver.session() as session:
+        lines.append("// --- Nodes ---")
+        # the Lecture node first, so the file loads stand-alone
+        lec = await session.run(
+            "MATCH (l:Lecture {id:$code}) RETURN properties(l) AS props", code=code)
+        lrec = await lec.single()
+        if lrec:
+            props = dict(lrec["props"])
+            assigns = ", ".join(f"n.{k}={_fmt(v)}" for k, v in props.items())
+            lines.append(f"MERGE (n:Lecture {{id:'{_esc(code)}'}})\n  SET {assigns};")
+        # the chapter subtree (all ids share the chapter prefix)
+        nodes = await session.run(
+            "MATCH (n) WHERE n.id STARTS WITH $pref "
+            "RETURN labels(n)[0] AS label, properties(n) AS props ORDER BY n.id",
+            pref=pref,
+        )
+        async for rec in nodes:
+            props = dict(rec["props"])
+            assigns = ", ".join(f"n.{k}={_fmt(v)}" for k, v in props.items())
+            lines.append(f"MERGE (n:{rec['label']} {{id:'{_esc(props.get('id'))}'}})\n  SET {assigns};")
+
+        lines.append("")
+        lines.append("// --- Relationships ---")
+        # the Lecture -> Chapter link (its source is the Lecture, outside the prefix)
+        lines.append(
+            f"MATCH (a {{id:'{_esc(code)}'}}), (b {{id:'{_esc(pref)}'}}) "
+            "MERGE (a)-[:HAS_CHAPTER]->(b);")
+        # every relationship that originates in this chapter (intra-chapter edges and
+        # any outgoing cross-chapter edge; the other endpoint is matched if present)
+        rels = await session.run(
+            "MATCH (a)-[r]->(b) WHERE a.id STARTS WITH $pref "
+            "RETURN a.id AS s, type(r) AS t, b.id AS o ORDER BY s, t, o",
+            pref=pref,
+        )
+        async for rec in rels:
+            lines.append(
+                "MATCH (a {{id:'{s}'}}), (b {{id:'{o}'}}) MERGE (a)-[:{t}]->(b);".format(
+                    s=_esc(rec["s"]), o=_esc(rec["o"]), t=rec["t"]))
+    return "\n".join(lines) + "\n"
+
+
+async def export_slides_cypher(code: str) -> str:
+    """Dump the :Slide nodes already staged for a lecture (all properties) plus
+    their COVERS edges, so the slides stage of a LATER chapter sees what already
+    exists and reuses ids instead of creating duplicate slide nodes."""
+    driver = get_driver()
+    lines = [
+        "// Existing :Slide nodes already in the graph.",
+        "// Do NOT recreate these — reuse the exact same id if you encounter the same page again.",
+        "",
+    ]
+    async with driver.session() as session:
+        nodes = await session.run(
+            "MATCH (s:Slide) WHERE s.id STARTS WITH $code "
+            "RETURN properties(s) AS props ORDER BY s.id",
+            code=code,
+        )
+        async for rec in nodes:
+            props = dict(rec["props"])
+            assigns = ", ".join(f"s.{k}={_fmt(v)}" for k, v in props.items())
+            lines.append(f"MERGE (s:Slide {{id:'{_esc(props.get('id'))}'}})\n  SET {assigns};")
+        rels = await session.run(
+            "MATCH (s:Slide)-[:COVERS]->(c:Concept) WHERE s.id STARTS WITH $code "
+            "RETURN s.id AS s, c.id AS c ORDER BY s, c",
+            code=code,
+        )
+        async for rec in rels:
+            lines.append(
+                "MATCH (s:Slide {{id:'{s}'}}), (c:Concept {{id:'{c}'}}) "
+                "MERGE (s)-[:COVERS]->(c);".format(s=_esc(rec["s"]), c=_esc(rec["c"])))
     return "\n".join(lines) + "\n"
 
 

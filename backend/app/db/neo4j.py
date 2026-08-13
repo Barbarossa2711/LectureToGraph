@@ -35,7 +35,7 @@ async def get_session():
 
 
 async def _create_constraints() -> None:
-    labels = ["Lecture", "Chapter", "Topic", "Subtopic", "Concept", "Question"]
+    labels = ["Lecture", "Chapter", "Topic", "Subtopic", "Concept", "Question", "Slide"]
     async with get_driver().session() as session:
         for label in labels:
             await session.run(

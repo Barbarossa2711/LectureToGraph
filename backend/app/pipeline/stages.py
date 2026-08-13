@@ -8,11 +8,56 @@ STAGE_EDGE_TYPES: dict[Stage, list[str]] = {
 }
 
 
+def questions_raw_name(chapter_no: int) -> str:
+    """Deterministic name for the verbatim questions captured during the first read,
+    so the (later) questions stage can use it instead of re-reading the PDF."""
+    return f"questions_raw_ch{chapter_no:02d}.json"
+
+
+def _questions_capture_block(chapter_no: int) -> str:
+    fname = questions_raw_name(chapter_no)
+    return (
+        "\n\nALSO, while you already have the deck open (so it need NOT be read again later), extract "
+        f"this chapter's review questions (Wiederholungsfragen / Kontrollfragen / Quiz / Repetition) "
+        f"VERBATIM and save them to `{fname}` (write_file) as a JSON list of objects: "
+        '`[{"index": 1, "text": "<exact question text>", "pageNumber": 12}, ...]`. '
+        "Keep the wording exact (fix only obvious OCR splits/typos). Do NOT map them to concepts and do "
+        "NOT write any Cypher for them here — the concept mapping is stage 3. If the chapter has no "
+        f"review questions, write an empty list `[]` to `{fname}`. (This file is an intermediate, not a "
+        "stage_complete artifact.)"
+    )
+
+
+def _slides_block(chapter_no: int) -> str:
+    chno = f"CH{chapter_no:02d}"
+    return (
+        f"\n\nTHEN, in this same step, add the SLIDES for chapter {chapter_no}. Turn this chapter's "
+        "slide deck into `:Slide` nodes — one node per slide/page — and link each slide to the "
+        "Concept(s) it presents via a COVERS edge (see the 'Step 3 — Slides' section of the skill).\n"
+        "- If `slides.cypher` exists in your workspace, read_file it first: it lists the `:Slide` nodes "
+        "already created for earlier chapters. One physical page = exactly ONE `:Slide` node; do NOT "
+        f"recreate a page already listed there, and only create slides for chapter {chapter_no}'s pages.\n"
+        f"- Each `:Slide` needs all eight properties; the id is `<CODE>_{chno}_SL<pageNumber>`. EVERY "
+        "property MUST be `s.`-prefixed.\n"
+        f"- HARD REQUIREMENT: every Concept of this chapter (ids starting with <CODE>_{chno}) MUST be "
+        "the target of at least one COVERS edge — no concept may be left without a source slide.\n"
+        "- Do NOT create `:Slide` nodes for content-less slides: table of contents, agenda, section "
+        "dividers, pure recap/Wiederholungsfragen, or image-only slides. Only create a `:Slide` if it "
+        "presents at least one concept (i.e. it will have ≥ 1 COVERS edge). Any free-standing Slide "
+        "without a COVERS edge is removed automatically, so don't bother creating it.\n"
+        f"- Write the slides into a separate file `<name>_slides.cypher`, then verify with run_script("
+        "\"verify_slides.py\", [\"--domain\", \"<name>.cypher\", \"--slides\", \"<name>_slides.cypher\"]).\n"
+        "Only call stage_complete once verify_slides.py prints HARD CHECKS PASSED. Pass BOTH artifacts in "
+        "order — the structural `<name>.cypher` FIRST, then `<name>_slides.cypher` (the structure must "
+        "load before the COVERS edges can attach)."
+    )
+
+
 def _domain_kickoff(chapter_no: int, is_first: bool) -> str:
     chno = f"CH{chapter_no:02d}"
     if is_first:
         return (
-            f"Stage 1 — domain model, CHAPTER {chapter_no} only. The uploaded lecture PDF(s) are "
+            f"Stage 1 — domain model + slides, CHAPTER {chapter_no} only. The uploaded lecture PDF(s) are "
             "already in your workspace; call list_dir(\".\") to see them and read them with read_pdf.\n\n"
             "First decide what kind of document you have:\n"
             "- If a PDF covers the WHOLE lecture (multiple chapters), read its table of contents / "
@@ -21,22 +66,26 @@ def _domain_kickoff(chapter_no: int, is_first: bool) -> str:
             "- If a PDF is a SINGLE chapter, just process it as the first chapter.\n\n"
             f"Process EXACTLY ONE chapter now and number it {chno} (ids like <CODE>_{chno}, "
             f"<CODE>_{chno}_T01, …). Do NOT create any other chapter. Write the <name>.structure.json, "
-            "generate the .cypher via run_script(\"json_to_cypher.py\", [\"<name>.structure.json\", "
-            "\"<name>.cypher\"]). Use ask_user for missing lecture metadata or ambiguous granularity. "
-            "When the .cypher is written, call stage_complete with its path."
+            "generate the structural .cypher via run_script(\"json_to_cypher.py\", "
+            "[\"<name>.structure.json\", \"<name>.cypher\"]). Use ask_user for missing lecture metadata "
+            "or ambiguous granularity."
+            + _questions_capture_block(chapter_no)
+            + _slides_block(chapter_no)
         )
     return (
-        f"Stage 1 — domain model, ADDING CHAPTER {chapter_no}. The lecture already exists; its current "
-        "domain model (all previously added chapters) is in `domain.cypher` in your workspace — read it "
-        "with read_file. Do NOT recreate or modify existing chapters.\n\n"
+        f"Stage 1 — domain model + slides, ADDING CHAPTER {chapter_no}. The lecture already exists; its "
+        "current domain model (all previously added chapters) is in `domain.cypher` in your workspace — "
+        "read it with read_file. Do NOT recreate or modify existing chapters.\n\n"
         "Find the new chapter's material:\n"
         "- If the user just uploaded a NEW single-chapter PDF, use it (list_dir to find the newest file).\n"
         "- Otherwise continue with the comprehensive PDF: take the chapter that comes AFTER the highest "
         "chapter already present in domain.cypher.\n"
         "Propose the chapter (title + page range) and call ask_user to confirm before building it.\n\n"
         f"Then add EXACTLY this one chapter and number it {chno} (ids start with <CODE>_{chno}). Write the "
-        "structure.json for this chapter, run json_to_cypher.py, and call stage_complete with the new "
-        f".cypher path. The new chapter must reuse the existing Lecture node and attach via HAS_CHAPTER."
+        "structure.json for this chapter and run json_to_cypher.py to produce its `<name>.cypher`. The new "
+        "chapter must reuse the existing Lecture node and attach via HAS_CHAPTER."
+        + _questions_capture_block(chapter_no)
+        + _slides_block(chapter_no)
     )
 
 
@@ -58,11 +107,18 @@ def _edges_kickoff(chapter_no: int) -> str:
 
 def _questions_kickoff(chapter_no: int) -> str:
     chno = f"CH{chapter_no:02d}"
+    raw = questions_raw_name(chapter_no)
     return (
         f"Stage 3 — review questions for CHAPTER {chapter_no} ({chno}) ONLY. The domain model is in "
-        "`domain.cypher` (read_file). The lecture PDF(s) are present. Extract this chapter's "
-        f"Wiederholungsfragen and write the questions .cypher for this chapter only "
-        f"(`{chapter_no:02d}-<chapter-slug>_questions.cypher`).\n\n"
+        "`domain.cypher` (read_file).\n\n"
+        f"The verbatim questions were ALREADY extracted during step 1 into `{raw}`. read_file it and use "
+        "it as your question source — do NOT read the PDF again unless that file is missing or clearly "
+        f"incomplete. If `{raw}` is an empty list `[]`, this chapter has no review questions: call "
+        "stage_complete immediately with an empty artifact list and do nothing else.\n\n"
+        "Your job here is the concept MAPPING: for each question from the file, find the fitting "
+        f"Concept(s) and write the questions .cypher for this chapter only "
+        f"(`{chapter_no:02d}-<chapter-slug>_questions.cypher`). Use each question's `text`, `index` and "
+        "`pageNumber` from the file verbatim.\n\n"
         "EXACT Cypher format — EVERY property MUST be prefixed with its node variable, and every "
         "statement ends with `;`. A property name on its own (e.g. `note='...'`) is a SYNTAX ERROR; "
         "it must be `q.note='...'`. Template for one question with two TESTS edges:\n"

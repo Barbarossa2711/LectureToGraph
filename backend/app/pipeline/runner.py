@@ -38,6 +38,11 @@ async def _seed_stage(job: Job) -> None:
     if job.lecture_code:
         domain = await cl.export_domain_cypher(job.lecture_code)
         (job.workspace / "domain.cypher").write_text(domain, encoding="utf-8")
+        # the domain stage now also creates slides; expose the slides that already
+        # exist (from earlier chapters) so it reuses their ids instead of duplicating
+        if job.stage is Stage.DOMAIN:
+            slides = await cl.export_slides_cypher(job.lecture_code)
+            (job.workspace / "slides.cypher").write_text(slides, encoding="utf-8")
     is_first = job.chapter_no == 1
     kickoff = stage_kickoff(job.stage, job.chapter_no, is_first)
     job.conversation = [Message(role="user", content=[TextBlock(text=kickoff)])]
@@ -100,13 +105,37 @@ async def _load_stage_artifacts(job: Job) -> None:
                 job.lecture_code = m.group(1)
         await cl.load_cypher_text(text)
     job.last_loaded_stage = job.stage
+    # the domain stage also creates slides — drop content-less ones (no COVERS edge),
+    # e.g. table-of-contents / agenda slides, so no free-standing Slide nodes remain
+    if job.stage is Stage.DOMAIN and job.lecture_code:
+        removed = await cl.delete_orphan_slides_in_chapter(job.lecture_code, job.chapter_no)
+        if removed:
+            await bus.publish(job.id, "log", {
+                "text": f"{removed} inhaltslose Folie(n) ohne Konzept entfernt."})
+
+
+async def _consolidate_chapter(job: Job) -> None:
+    """Write the single consolidated `<CODE>_CHNN.cypher` for the finished chapter
+    and collapse the download list so only ONE .cypher per chapter is offered."""
+    code = job.lecture_code
+    if not code:
+        return
+    text = await cl.export_chapter_cypher(code, job.chapter_no)
+    name = f"{code}_CH{job.chapter_no:02d}.cypher"
+    ensure_workspace(job)
+    (job.workspace / name).write_text(text, encoding="utf-8")
+    consolidated = job.artifacts.get("KAPITEL", [])
+    if name not in consolidated:
+        consolidated = consolidated + [name]
+    job.artifacts = {"KAPITEL": consolidated}
 
 
 async def approve_gate(job: Job) -> None:
     try:
         nxt = job.next_stage()
         if nxt is None:
-            # finished this chapter's questions -> let the user add another chapter
+            # finished this chapter -> consolidate to one file, then offer another chapter
+            await _consolidate_chapter(job)
             await _set_status(job, JobStatus.AWAITING_NEXT_CHAPTER)
             return
         job.stage = nxt
