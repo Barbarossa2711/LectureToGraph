@@ -41,5 +41,18 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-5.4"
     openai_model_fast: str = "gpt-5.4-mini"
 
+    # A private, OpenAI-compatible endpoint (a university cluster behind an
+    # OpenWebUI gateway here). Leaving the base URL empty hides the provider
+    # from the UI, so an unconfigured install behaves exactly as before.
+    cluster_base_url: str | None = None            # must end in /api/v1 for OpenWebUI
+    cluster_api_key: str | None = None
+    cluster_label: str = "Hochschul-Cluster"
+    cluster_model: str = "moonshotai/Kimi-K2.7"
+    cluster_model_fast: str | None = None
+    # Self-signed certificate: point at the server certificate. Only if that
+    # cannot be made to work, disable verification with cluster_verify_ssl.
+    cluster_ca_bundle: Path | None = None
+    cluster_verify_ssl: bool = True
+
 
 settings = Settings()

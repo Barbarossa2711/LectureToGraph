@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import httpx
 from openai import AsyncOpenAI
 
 from app.ai.base import LLMProvider
@@ -18,13 +19,23 @@ def _image_part(block: ImageBlock) -> dict:
     }
 
 
-def _to_openai_messages(system: str, messages: list[Message]) -> list[dict]:
+def _to_openai_messages(
+    system: str,
+    messages: list[Message],
+    *,
+    blank_assistant_content: bool = False,
+) -> list[dict]:
     """Flatten normalized messages into OpenAI chat messages.
 
     - assistant text + tool_use -> one assistant message with tool_calls
     - tool_result blocks -> one role:"tool" message each (text only); any images
       in a tool result are appended as a following role:"user" message, since the
       OpenAI tool role does not accept image parts.
+
+    ``blank_assistant_content`` writes "" instead of null for an assistant
+    message that carries only tool_calls. api.openai.com accepts null, but an
+    OpenWebUI gateway measures the length of that field and answers
+    400 "object of type 'NoneType' has no len()".
     """
     out: list[dict] = [{"role": "system", "content": system}]
 
@@ -39,7 +50,10 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict]:
                 }
                 for b in m.content if isinstance(b, ToolUseBlock)
             ]
-            msg: dict = {"role": "assistant", "content": text or None}
+            msg: dict = {
+                "role": "assistant",
+                "content": text or ("" if blank_assistant_content else None),
+            }
             if tool_calls:
                 msg["tool_calls"] = tool_calls
             out.append(msg)
@@ -76,16 +90,42 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict]:
 
 
 class OpenAIProvider(LLMProvider):
+    """Adapter for api.openai.com and for any OpenAI-compatible endpoint.
+
+    The defaults reproduce the previous behaviour exactly; a private endpoint
+    is configured through ``base_url``, ``http_client`` (for a self-signed
+    certificate) and ``blank_assistant_content`` (gateway quirk).
+    """
+
     name = "openai"
 
-    def __init__(self, api_key: str):
-        self._client = AsyncOpenAI(api_key=api_key)
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        blank_assistant_content: bool = False,
+        name: str | None = None,
+    ):
+        kwargs: dict = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        if http_client is not None:
+            kwargs["http_client"] = http_client
+        self._client = AsyncOpenAI(**kwargs)
+        self._blank_assistant_content = blank_assistant_content
+        if name:
+            self.name = name
 
     async def chat(self, *, system, messages, tools, model, max_tokens) -> LLMResponse:
         resp = await self._client.chat.completions.create(
             model=model,
             max_completion_tokens=max_tokens,
-            messages=_to_openai_messages(system, messages),
+            messages=_to_openai_messages(
+                system, messages,
+                blank_assistant_content=self._blank_assistant_content,
+            ),
             tools=[
                 {
                     "type": "function",

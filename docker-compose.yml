@@ -36,8 +36,17 @@ services:
       # Provider API keys are read from your shell environment (or a .env file).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Optional private endpoint. Empty base URL -> provider stays hidden.
+      CLUSTER_BASE_URL: ${CLUSTER_BASE_URL:-}
+      CLUSTER_API_KEY: ${CLUSTER_API_KEY:-}
+      CLUSTER_MODEL: ${CLUSTER_MODEL:-moonshotai/Kimi-K2.7}
+      CLUSTER_CA_BUNDLE: ${CLUSTER_CA_BUNDLE:-}
+      CLUSTER_VERIFY_SSL: ${CLUSTER_VERIFY_SSL:-true}
     volumes:
       - workspace_data:/work
+      # Server certificate for a self-signed CLUSTER_BASE_URL. Put the .pem into
+      # ./certs and point CLUSTER_CA_BUNDLE at /certs/<name>.pem
+      - ./certs:/certs:ro
     # lets the container reach a Neo4j running on the host (host.docker.internal)
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 from openai import AsyncOpenAI
@@ -76,6 +77,24 @@ async def _openai_models(api_key: str) -> list[dict]:
     return models
 
 
+def _cluster_http_client() -> httpx.AsyncClient | None:
+    """TLS setup for the private endpoint, or None for the SDK default.
+
+    A self-signed certificate is trusted by naming it as the only anchor, so
+    the connection stays protected against a man in the middle. Timeouts match
+    the SDK default, since passing a client of our own replaces it.
+    """
+    timeout = httpx.Timeout(timeout=600.0, connect=5.0)
+    if settings.cluster_ca_bundle:
+        path = Path(settings.cluster_ca_bundle)
+        if not path.is_file():
+            raise ValueError(f"CLUSTER_CA_BUNDLE is not a file: {path}")
+        return httpx.AsyncClient(verify=str(path), timeout=timeout)
+    if not settings.cluster_verify_ssl:
+        return httpx.AsyncClient(verify=False, timeout=timeout)
+    return None
+
+
 async def list_providers() -> list[ProviderInfo]:
     # Anthropic
     anthropic_available = bool(settings.anthropic_api_key)
@@ -108,6 +127,18 @@ async def list_providers() -> list[ProviderInfo]:
         ]
     openai_models, openai_default = _mark_default(openai_models, settings.openai_model)
 
+    # Private cluster. The model list is taken from the configuration instead of
+    # GET /models on purpose: _is_openai_chat_model only lets gpt-* and o<n>-*
+    # through and would drop an id such as "moonshotai/Kimi-K2.7".
+    cluster_available = bool(settings.cluster_base_url)
+    cluster_models = [{"id": settings.cluster_model, "label": settings.cluster_model}]
+    if settings.cluster_model_fast:
+        cluster_models.append({
+            "id": settings.cluster_model_fast,
+            "label": settings.cluster_model_fast,
+        })
+    cluster_models, cluster_default = _mark_default(cluster_models, settings.cluster_model)
+
     return [
         ProviderInfo(
             name="anthropic",
@@ -123,6 +154,13 @@ async def list_providers() -> list[ProviderInfo]:
             models=openai_models,
             default_model=openai_default,
         ),
+        ProviderInfo(
+            name="cluster",
+            label=settings.cluster_label,
+            available=cluster_available,
+            models=cluster_models,
+            default_model=cluster_default,
+        ),
     ]
 
 
@@ -135,4 +173,16 @@ def get_provider(name: str) -> LLMProvider:
         if not settings.openai_api_key:
             raise ValueError("OPENAI_API_KEY is not configured")
         return OpenAIProvider(settings.openai_api_key)
+    if name == "cluster":
+        if not settings.cluster_base_url:
+            raise ValueError("CLUSTER_BASE_URL is not configured")
+        # The gateway needs no key of its own on some installations, but the
+        # SDK insists on a non-empty value.
+        return OpenAIProvider(
+            settings.cluster_api_key or "not-needed",
+            base_url=settings.cluster_base_url,
+            http_client=_cluster_http_client(),
+            blank_assistant_content=True,
+            name="cluster",
+        )
     raise ValueError(f"unknown provider '{name}'")
