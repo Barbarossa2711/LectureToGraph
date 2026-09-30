@@ -29,6 +29,7 @@ The project is open for further development, e.g. as a bachelor's thesis; see
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Workflow](#workflow)
+- [Screenshots](#screenshots)
 - [Graph schema](#graph-schema)
 - [How it works](#how-it-works)
 - [Architecture](#architecture)
@@ -150,6 +151,31 @@ the pipeline continues once it is answered.
 A re-run is limited to the current stage of the current chapter: the tool deletes what this
 stage created in the chapter and starts the agent with a fresh conversation, with the
 feedback as additional instruction. Approved chapters and earlier stages are not affected.
+
+---
+
+## Screenshots
+
+The screenshots show the validation gates for the first chapter of the sample lecture
+*Einführung in Datenbanksysteme*. On the left are the stage indicator, the agent's log and
+the Cypher export, in the middle the generated graph, and on the right the panel to approve
+the stage or re-run it with feedback.
+
+**Stage 1 · Lecture structure.** The graph shows lecture, chapter, topics, concepts and
+slides in the hierarchical layout.
+
+![Validation gate of stage 1](graphics/Phase1.png)
+
+**Stage 2 · Concept edges.** The graph additionally shows the concept edges `PREREQUISITE`
+(red) and `FACILITATOR` (yellow). The filter menu hides individual node and edge types,
+here the slides.
+
+![Validation gate of stage 2](graphics/Phase2.png)
+
+**Stage 3 · Review questions.** Review questions (purple) with their dashed `TESTS` edges.
+On the right, the editor is open to add, change or delete nodes and edges before approval.
+
+![Validation gate of stage 3 with the editor open](graphics/Phase3_editor.png)
 
 ---
 
@@ -495,6 +521,7 @@ frontend/
     api/client.ts, store/pipelineStore.ts, types/graph.ts
   Dockerfile, nginx.conf, package.json
 certs/            server certificate for a self-signed cluster endpoint (git-ignored)
+graphics/         screenshots used in this README
 docker-compose.yml
 Beispiel-Vorlesung.pdf
 ```
