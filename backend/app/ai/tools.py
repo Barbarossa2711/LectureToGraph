@@ -1,6 +1,7 @@
-"""Provider-agnostic tool schemas exposed to the agent. The set is the same for
-every stage; `run_script` is gated per-stage at execution time via the skill's
-allowed_scripts whitelist."""
+"""
+Provider-agnostic tool schemas exposed to the agent. Every stage gets the same set;
+run_script is restricted per stage at execution time by the skill's allowed_scripts.
+"""
 from __future__ import annotations
 
 from app.models.ai import ToolSchema

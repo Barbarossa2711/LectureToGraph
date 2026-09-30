@@ -2,25 +2,37 @@ from __future__ import annotations
 
 from app.skills.registry import Stage
 
-# Relationship types each stage contributes (used to scope a re-run reset).
+# Relationship types a stage creates, deleted before the stage is re-run.
 STAGE_EDGE_TYPES: dict[Stage, list[str]] = {
     Stage.EDGES: ["PREREQUISITE", "FACILITATOR", "SAME_AS"],
 }
 
 
 def questions_raw_name(chapter_no: int) -> str:
-    """Deterministic name for the verbatim questions captured during the first read,
-    so the (later) questions stage can use it instead of re-reading the PDF."""
+    """
+    Name the file for the review questions captured verbatim in the domain stage.
+
+    The questions stage reads this file instead of reading the PDF again.
+
+    :param chapter_no: The chapter number.
+    :return: The workspace-relative file name.
+    """
     return f"questions_raw_ch{chapter_no:02d}.json"
 
 
 def _questions_capture_block(chapter_no: int) -> str:
+    """
+    Build the prompt part asking the domain stage to capture the review questions verbatim.
+
+    :param chapter_no: The chapter number.
+    :return: The prompt text.
+    """
     fname = questions_raw_name(chapter_no)
     return (
         "\n\nALSO, while you already have the deck open (so it need NOT be read again later), extract "
         f"this chapter's review questions (Wiederholungsfragen / Kontrollfragen / Quiz / Repetition) "
         f"VERBATIM and save them to `{fname}` (write_file) as a JSON list of objects: "
-        '`[{"index": 1, "text": "<exact question text>", "pageNumber": 12}, ...]`. '
+        '`[{"index": 1, "text": "<exact question text>", "pageNr": 12}, ...]`. '
         "Keep the wording exact (fix only obvious OCR splits/typos). Do NOT map them to concepts and do "
         "NOT write any Cypher for them here — the concept mapping is stage 3. If the chapter has no "
         f"review questions, write an empty list `[]` to `{fname}`. (This file is an intermediate, not a "
@@ -29,6 +41,12 @@ def _questions_capture_block(chapter_no: int) -> str:
 
 
 def _slides_block(chapter_no: int) -> str:
+    """
+    Build the prompt part asking the domain stage to create Slide nodes with COVERS edges.
+
+    :param chapter_no: The chapter number.
+    :return: The prompt text.
+    """
     chno = f"CH{chapter_no:02d}"
     return (
         f"\n\nTHEN, in this same step, add the SLIDES for chapter {chapter_no}. Turn this chapter's "
@@ -37,7 +55,7 @@ def _slides_block(chapter_no: int) -> str:
         "- If `slides.cypher` exists in your workspace, read_file it first: it lists the `:Slide` nodes "
         "already created for earlier chapters. One physical page = exactly ONE `:Slide` node; do NOT "
         f"recreate a page already listed there, and only create slides for chapter {chapter_no}'s pages.\n"
-        f"- Each `:Slide` needs all eight properties; the id is `<CODE>_{chno}_SL<pageNumber>`. EVERY "
+        f"- Each `:Slide` needs all eight properties; the id is `<CODE>_{chno}_SL<pageNr>`. EVERY "
         "property MUST be `s.`-prefixed.\n"
         f"- HARD REQUIREMENT: every Concept of this chapter (ids starting with <CODE>_{chno}) MUST be "
         "the target of at least one COVERS edge — no concept may be left without a source slide.\n"
@@ -54,6 +72,13 @@ def _slides_block(chapter_no: int) -> str:
 
 
 def _domain_kickoff(chapter_no: int, is_first: bool) -> str:
+    """
+    Build the kickoff message of the domain stage.
+
+    :param chapter_no: The chapter number.
+    :param is_first: True for the first chapter, which also creates the lecture.
+    :return: The prompt text.
+    """
     chno = f"CH{chapter_no:02d}"
     if is_first:
         return (
@@ -90,6 +115,12 @@ def _domain_kickoff(chapter_no: int, is_first: bool) -> str:
 
 
 def _edges_kickoff(chapter_no: int) -> str:
+    """
+    Build the kickoff message of the concept edge stage.
+
+    :param chapter_no: The chapter number.
+    :return: The prompt text.
+    """
     chno = f"CH{chapter_no:02d}"
     return (
         f"Stage 2 — concept edges for CHAPTER {chapter_no} ({chno}) ONLY. The full domain model is in "
@@ -106,6 +137,12 @@ def _edges_kickoff(chapter_no: int) -> str:
 
 
 def _questions_kickoff(chapter_no: int) -> str:
+    """
+    Build the kickoff message of the review question stage.
+
+    :param chapter_no: The chapter number.
+    :return: The prompt text.
+    """
     chno = f"CH{chapter_no:02d}"
     raw = questions_raw_name(chapter_no)
     return (
@@ -118,14 +155,14 @@ def _questions_kickoff(chapter_no: int) -> str:
         "Your job here is the concept MAPPING: for each question from the file, find the fitting "
         f"Concept(s) and write the questions .cypher for this chapter only "
         f"(`{chapter_no:02d}-<chapter-slug>_questions.cypher`). Use each question's `text`, `index` and "
-        "`pageNumber` from the file verbatim.\n\n"
+        "`pageNr` from the file verbatim.\n\n"
         "EXACT Cypher format — EVERY property MUST be prefixed with its node variable, and every "
         "statement ends with `;`. A property name on its own (e.g. `note='...'`) is a SYNTAX ERROR; "
         "it must be `q.note='...'`. Template for one question with two TESTS edges:\n"
         f"CREATE CONSTRAINT IF NOT EXISTS FOR (q:Question) REQUIRE q.id IS UNIQUE;\n"
         f"MERGE (q:Question {{id:'<CODE>_{chno}_Q04'}})\n"
         "  SET q.text='Warum setzt ein INNER JOIN das relationale Modell voraus?',\n"
-        f"      q.index=4, q.chapter='<CODE>_{chno}', q.pageNumber=2,\n"
+        f"      q.index=4, q.chapter='<CODE>_{chno}', q.pageNr=2,\n"
         "      q.source='Vorlesung.pdf', q.note='Cross-chapter exception: ...';\n"
         f"MATCH (c:Chapter {{id:'<CODE>_{chno}'}}), (q:Question {{id:'<CODE>_{chno}_Q04'}}) "
         "MERGE (c)-[:HAS_QUESTION]->(q);\n"
@@ -144,6 +181,14 @@ def _questions_kickoff(chapter_no: int) -> str:
 
 
 def stage_kickoff(stage: Stage, chapter_no: int, is_first_chapter: bool) -> str:
+    """
+    Build the first user message of a stage.
+
+    :param stage: The stage.
+    :param chapter_no: The chapter number.
+    :param is_first_chapter: True for the first chapter of the job.
+    :return: The prompt text.
+    """
     if stage is Stage.DOMAIN:
         return _domain_kickoff(chapter_no, is_first_chapter)
     if stage is Stage.EDGES:

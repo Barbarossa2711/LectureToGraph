@@ -15,24 +15,24 @@ class NodeType(str, Enum):
 
 
 class EdgeType(str, Enum):
-    # hierarchy
+    # Hierarchy
     HAS_CHAPTER = "HAS_CHAPTER"
     HAS_TOPIC = "HAS_TOPIC"
     HAS_SUBTOPIC = "HAS_SUBTOPIC"
     HAS_CONCEPT = "HAS_CONCEPT"
-    # concept dependency edges
+    # Concept dependencies
     PREREQUISITE = "PREREQUISITE"
     FACILITATOR = "FACILITATOR"
     SAME_AS = "SAME_AS"
-    # review questions
+    # Review questions
     HAS_QUESTION = "HAS_QUESTION"
     TESTS = "TESTS"
 
 
 NODE_LABELS = [t.value for t in NodeType]
 
-# Which edge points from a parent to this node type (used when creating a node
-# manually at a validation gate). TESTS is not a parent edge (Question->Concept).
+# The edge from a parent to a node of this type, used when a node is created
+# manually at a validation gate. TESTS (Question -> Concept) is no parent edge.
 PARENT_EDGE: dict[NodeType, EdgeType] = {
     NodeType.CHAPTER: EdgeType.HAS_CHAPTER,
     NodeType.TOPIC: EdgeType.HAS_TOPIC,
@@ -41,8 +41,6 @@ PARENT_EDGE: dict[NodeType, EdgeType] = {
     NodeType.QUESTION: EdgeType.HAS_QUESTION,
 }
 
-
-# ---------- Node ----------
 
 class NodeCreate(BaseModel):
     id: str
@@ -61,8 +59,6 @@ class NodeResponse(BaseModel):
     properties: dict[str, Any]
 
 
-# ---------- Edge ----------
-
 class EdgeCreate(BaseModel):
     source_id: str
     target_id: str
@@ -74,8 +70,6 @@ class EdgeResponse(BaseModel):
     target_id: str
     edge_type: EdgeType
 
-
-# ---------- Graph (for neovis.js / vis-network fallback) ----------
 
 class GraphNode(BaseModel):
     id: str
@@ -93,8 +87,6 @@ class GraphResponse(BaseModel):
     nodes: list[GraphNode]
     edges: list[GraphEdge]
 
-
-# ---------- Lecture summary (derived from staged Lecture nodes) ----------
 
 class LectureSummary(BaseModel):
     id: str

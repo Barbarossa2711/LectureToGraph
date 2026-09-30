@@ -6,7 +6,7 @@ Hard checks (exit 1 on failure):
   - Slide ids are unique
   - every COVERS target is a *defined* :Concept node (no typos / removed nodes)
   - every Slide carries all eight required properties
-    (id, title, pageNumber, source, lecture, chapter, chapterIndex, chapterName)
+    (id, title, pageNr, source, lecture, chapter, chapterIndex, chapterName)
   - every :Concept of a chapter that has slides is COVERED by at least one slide
     (no chapter concept may be left without a source slide)
 
@@ -21,7 +21,7 @@ import argparse, glob, re, sys
 from collections import defaultdict
 
 CONCEPT_DEF = re.compile(r"MERGE \(\w+:Concept \{id:'([^']+)'\}\)")
-# a slide MERGE statement and everything up to its terminating ';'
+# A Slide MERGE statement up to its terminating ';'
 SLIDE_STMT = re.compile(
     r"MERGE \(\w+:Slide \{id:'([^']+)'\}\)(.*?);", re.DOTALL
 )
@@ -30,11 +30,17 @@ COVERS = re.compile(
     r"MERGE \(\w+\)-\[:COVERS\]->\(\w+\)"
 )
 
-REQUIRED = ["id", "title", "pageNumber", "source",
+REQUIRED = ["id", "title", "pageNr", "source",
             "lecture", "chapter", "chapterIndex", "chapterName"]
 
 
 def expand(globs):
+    """
+    Expand shell globs into a sorted list of file paths.
+
+    :param globs: The glob patterns.
+    :return: The matching files, sorted per pattern.
+    """
     out = []
     for g in globs:
         out.extend(sorted(glob.glob(g)))
@@ -42,11 +48,22 @@ def expand(globs):
 
 
 def chapter_of(nid):
+    """
+    Infer the chapter from an id with a <CODE>_CHNN prefix.
+
+    :param nid: The node id.
+    :return: The chapter prefix, or "?" if the id has none.
+    """
     m = re.match(r"([A-Za-z]+_CH\d+)", nid)
     return m.group(1) if m else "?"
 
 
 def main():
+    """
+    Run all slide checks and exit with 0 if the hard checks pass, 1 otherwise.
+
+    :return: None
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--domain", action="append", required=True)
     ap.add_argument("--slides", action="append", required=True)
@@ -85,7 +102,6 @@ def main():
           if missing_props else "PASS  every Slide has all required properties")
     ok &= not missing_props
 
-    # every concept of a chapter that has slides must be covered by >= 1 slide
     covered_targets = {c for _, c in covers}
     slide_chapters = {chapter_of(s) for s in slide_ids}
     required = {c for c in defined if chapter_of(c) in slide_chapters}

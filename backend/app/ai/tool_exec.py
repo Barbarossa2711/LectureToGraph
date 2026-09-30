@@ -11,6 +11,14 @@ from app.skills.registry import STAGE_SKILLS
 
 
 def _safe_path(root: Path, rel: str) -> Path:
+    """
+    Resolve a workspace-relative path and reject paths outside the workspace.
+
+    :param root: The job workspace.
+    :param rel: The path given by the model.
+    :return: The resolved absolute path.
+    :raises ValueError: If the path escapes the workspace.
+    """
     p = (root / rel).resolve()
     root = root.resolve()
     if not (p == root or root in p.parents):
@@ -19,14 +27,37 @@ def _safe_path(root: Path, rel: str) -> Path:
 
 
 def _ok(call: ToolUseBlock, text: str) -> ToolResultBlock:
+    """
+    Build a successful text tool result.
+
+    :param call: The tool call being answered.
+    :param text: The result text.
+    :return: The tool result.
+    """
     return ToolResultBlock(tool_use_id=call.id, content=[TextBlock(text=text)])
 
 
 def _err(call: ToolUseBlock, text: str) -> ToolResultBlock:
+    """
+    Build a failed text tool result.
+
+    :param call: The tool call being answered.
+    :param text: The error message.
+    :return: The tool result flagged as error.
+    """
     return ToolResultBlock(tool_use_id=call.id, content=[TextBlock(text=text)], is_error=True)
 
 
 async def execute_tool(job: Job, call: ToolUseBlock) -> ToolResultBlock:
+    """
+    Execute a workspace tool call. ask_user and stage_complete are handled by the agent loop.
+
+    Any exception is returned to the model as an error result instead of being raised.
+
+    :param job: The job whose workspace the tool works in.
+    :param call: The tool call from the model.
+    :return: The tool result.
+    """
     root = job.workspace
     root.mkdir(parents=True, exist_ok=True)
     args = call.input or {}
@@ -67,6 +98,13 @@ async def execute_tool(job: Job, call: ToolUseBlock) -> ToolResultBlock:
 
 
 async def _run_script(job: Job, call: ToolUseBlock) -> ToolResultBlock:
+    """
+    Run a skill script that is whitelisted for the job's current stage.
+
+    :param job: The job; the script runs with its workspace as working directory.
+    :param call: The run_script tool call with script name and arguments.
+    :return: The exit code, stdout and stderr; flagged as error on a non-zero exit code.
+    """
     skill = STAGE_SKILLS[job.stage]
     script = call.input.get("script", "")
     if script not in skill.allowed_scripts:

@@ -7,6 +7,13 @@ router = APIRouter(prefix="/edges", tags=["edges"])
 
 @router.post("", response_model=EdgeResponse, status_code=201)
 async def create_edge(body: EdgeCreate):
+    """
+    Create an edge between two nodes unless it exists.
+
+    :param body: Source id, target id and edge type.
+    :return: The edge.
+    :raises HTTPException: 404 if a node is missing.
+    """
     rel_type = body.edge_type.value
     async with get_session() as session:
         result = await session.run(
@@ -30,6 +37,15 @@ async def create_edge(body: EdgeCreate):
 
 @router.delete("", status_code=204)
 async def delete_edge(source_id: str, target_id: str, edge_type: str):
+    """
+    Delete the edges of a type between two nodes.
+
+    :param source_id: The id of the source node.
+    :param target_id: The id of the target node.
+    :param edge_type: The relationship type.
+    :return: None
+    :raises HTTPException: 404 if no edge matched.
+    """
     async with get_session() as session:
         result = await session.run(
             f"""

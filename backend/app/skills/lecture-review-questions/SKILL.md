@@ -29,7 +29,7 @@ mapping is the part that needs human judgement.
 ```
 
 - `:Question` properties: `id` (`BDT_CHNN_Qmm`), `text` (verbatim question), `index` (number within
-  the chapter), `chapter`, `pageNumber`, `source` (pdf filename). Mirror your `:Slide` node style.
+  the chapter), `chapter`, `pageNr`, `source` (pdf filename). Mirror your `:Slide` node style.
 - A question may have **several** TESTS edges when it is compound (e.g. "explain BNL-, Sort-Merge-
   and Hash-Join" → all three join concepts; "explain DW, Data Lake, Fabric, Lakehouse, Mesh" → five
   architecture concepts). Map to the genuinely-fitting concept(s), usually 1–4.
@@ -47,7 +47,7 @@ mapping is the part that needs human judgement.
 ## Workflow per chapter
 
 1. **Find the question slides.** Grep the chapter's slides Cypher for the recap-slide titles
-   (e.g. `Wiederholung`, `Kontrollfrag`, `Quiz`, `Repetition`) to get the slide ids + `pageNumber`s.
+   (e.g. `Wiederholung`, `Kontrollfrag`, `Quiz`, `Repetition`) to get the slide ids + `pageNr`s.
    A chapter may have several (e.g. "Wiederholungsfragen (1/2)" + "(2/2)", or split by sub-topic).
 2. **Extract the verbatim question text** from those PDF pages:
    `pdftotext -f P -l P -layout chapter.pdf -`. Each bullet is one question. Keep the wording exact

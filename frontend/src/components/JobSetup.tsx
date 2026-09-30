@@ -3,6 +3,11 @@ import { usePipelineStore } from '../store/pipelineStore'
 import { createJob, uploadPdfs, startJob, getJob } from '../api/client'
 import type { Language } from '../types/graph'
 
+/**
+ * Form to choose provider, model and language, upload the PDFs and start the pipeline.
+ *
+ * @returns The form.
+ */
 export default function JobSetup() {
   const { providers, loadProviders, setJob, connect } = usePipelineStore()
   const [provider, setProvider] = useState('')
@@ -31,13 +36,13 @@ export default function JobSetup() {
     try {
       setPhase('Job wird angelegt…')
       const job = await createJob(provider, model, language)
-      connect(job.id)                                  // capture events from the start
+      connect(job.id)                                  // Subscribe before starting so no event is missed.
       setPhase('PDF(s) werden hochgeladen…')
       await uploadPdfs(job.id, files)
       setPhase('KI-Modus wird gestartet…')
       await startJob(job.id)
       const fresh = await getJob(job.id)
-      setJob(fresh)                                    // hand over to the pipeline view only now
+      setJob(fresh)                                    // Switch to the pipeline view only now.
     } catch (e: any) {
       setErr(e?.response?.data?.detail ?? e?.message ?? 'Fehler beim Start')
       setPhase(null)

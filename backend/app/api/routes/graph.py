@@ -7,7 +7,14 @@ router = APIRouter(prefix="/lectures", tags=["graph"])
 
 @router.get("/{code}/graph", response_model=GraphResponse)
 async def get_graph(code: str):
-    """Scoped subgraph for a lecture (server-side fallback to neovis.js)."""
+    """
+    Return the subgraph of a lecture, as server-side alternative to neovis.js.
+
+    Only known node labels and edge types are included.
+
+    :param code: The lecture code; nodes are matched by this id prefix.
+    :return: The nodes and edges of the lecture.
+    """
     node_labels = {t.value for t in NodeType}
     edge_types = {t.value for t in EdgeType}
 

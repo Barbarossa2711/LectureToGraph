@@ -14,6 +14,8 @@ from app.ai.openai_provider import OpenAIProvider
 
 @dataclass
 class ProviderInfo:
+    """What the setup form needs to know about one LLM provider."""
+
     name: str
     label: str
     available: bool
@@ -21,7 +23,7 @@ class ProviderInfo:
     default_model: str | None
 
 
-# Substrings that mark an OpenAI model id as NOT a chat/completions model.
+# Substrings that mark an OpenAI model id as not being a chat model.
 _OPENAI_EXCLUDE = (
     "embedding", "whisper", "tts", "audio", "dall-e", "image", "moderation",
     "realtime", "transcribe", "search", "davinci", "babbage", "codex",
@@ -29,15 +31,26 @@ _OPENAI_EXCLUDE = (
 
 
 def _is_openai_chat_model(mid: str) -> bool:
+    """
+    Decide whether an OpenAI model id is a chat model (gpt-* or reasoning models o<n>-*).
+
+    :param mid: The model id.
+    :return: True if the model can be used for chat completions.
+    """
     low = mid.lower()
     if any(bad in low for bad in _OPENAI_EXCLUDE):
         return False
-    # chat families: gpt-*, and reasoning models o1/o3/o4-*
     return low.startswith("gpt") or (len(low) > 1 and low[0] == "o" and low[1].isdigit())
 
 
 def _mark_default(models: list[dict], preferred: str | None) -> tuple[list[dict], str | None]:
-    """Flag the preferred model as default; fall back to the first model."""
+    """
+    Flag the preferred model as default, or the first model if it is not in the list.
+
+    :param models: The models as {id, label} dicts.
+    :param preferred: The id of the preferred model.
+    :return: The models with a "default" flag, and the id of the default model.
+    """
     if not models:
         return [], None
     ids = [m["id"] for m in models]
@@ -49,7 +62,14 @@ def _mark_default(models: list[dict], preferred: str | None) -> tuple[list[dict]
 
 
 async def _anthropic_models(api_key: str) -> list[dict]:
-    # The installed SDK has no `models` resource, so hit the REST endpoint directly.
+    """
+    Fetch the models available to an Anthropic API key.
+
+    The installed SDK has no models resource, so the REST endpoint is called directly.
+
+    :param api_key: The Anthropic API key.
+    :return: The models as {id, label} dicts.
+    """
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.get(
             "https://api.anthropic.com/v1/models",
@@ -66,6 +86,12 @@ async def _anthropic_models(api_key: str) -> list[dict]:
 
 
 async def _openai_models(api_key: str) -> list[dict]:
+    """
+    Fetch the chat models available to an OpenAI API key.
+
+    :param api_key: The OpenAI API key.
+    :return: The chat models as {id, label} dicts, sorted by id.
+    """
     client = AsyncOpenAI(api_key=api_key)
     page = await client.models.list()
     models = [
@@ -78,11 +104,15 @@ async def _openai_models(api_key: str) -> list[dict]:
 
 
 def _cluster_http_client() -> httpx.AsyncClient | None:
-    """TLS setup for the private endpoint, or None for the SDK default.
+    """
+    Build the HTTP client with the TLS setup for the private cluster endpoint.
 
-    A self-signed certificate is trusted by naming it as the only anchor, so
-    the connection stays protected against a man in the middle. Timeouts match
-    the SDK default, since passing a client of our own replaces it.
+    A self-signed certificate is trusted by naming it as the only anchor, so the
+    connection stays protected against a man in the middle. The timeouts match the
+    SDK default, since passing a client of our own replaces it.
+
+    :return: The configured client, or None to use the SDK default.
+    :raises ValueError: If CLUSTER_CA_BUNDLE does not point to a file.
     """
     timeout = httpx.Timeout(timeout=600.0, connect=5.0)
     if settings.cluster_ca_bundle:
@@ -95,8 +125,35 @@ def _cluster_http_client() -> httpx.AsyncClient | None:
     return None
 
 
+async def _cluster_models() -> list[dict]:
+    """
+    Fetch all models the cluster gateway offers.
+
+    Unlike for OpenAI, the list is not filtered: _is_openai_chat_model only accepts
+    gpt-* and o<n>-* and would drop ids such as "zai-org/GLM-5.3" or "ultrabrain".
+
+    :return: The models as {id, label} dicts, sorted by id.
+    """
+    client = AsyncOpenAI(
+        api_key=settings.cluster_api_key or "not-needed",
+        base_url=settings.cluster_base_url,
+        http_client=_cluster_http_client(),
+        timeout=20,
+    )
+    page = await client.models.list()
+    models = [{"id": m.id, "label": m.id} for m in page.data if m.id]
+    models.sort(key=lambda m: m["id"].lower())
+    return models
+
+
 async def list_providers() -> list[ProviderInfo]:
-    # Anthropic
+    """
+    Describe every provider with its availability and models.
+
+    Models are fetched live. If that fails, the configured models are offered instead.
+
+    :return: The Anthropic, OpenAI and cluster provider info.
+    """
     anthropic_available = bool(settings.anthropic_api_key)
     anthropic_models: list[dict] = []
     if anthropic_available:
@@ -105,14 +162,12 @@ async def list_providers() -> list[ProviderInfo]:
         except Exception:
             anthropic_models = []
     if not anthropic_models:
-        # fall back to the configured defaults so the UI still has options
         anthropic_models = [
             {"id": settings.anthropic_model, "label": settings.anthropic_model},
             {"id": settings.anthropic_model_fast, "label": settings.anthropic_model_fast},
         ]
     anthropic_models, anthropic_default = _mark_default(anthropic_models, settings.anthropic_model)
 
-    # OpenAI
     openai_available = bool(settings.openai_api_key)
     openai_models: list[dict] = []
     if openai_available:
@@ -127,16 +182,20 @@ async def list_providers() -> list[ProviderInfo]:
         ]
     openai_models, openai_default = _mark_default(openai_models, settings.openai_model)
 
-    # Private cluster. The model list is taken from the configuration instead of
-    # GET /models on purpose: _is_openai_chat_model only lets gpt-* and o<n>-*
-    # through and would drop an id such as "moonshotai/Kimi-K2.7".
     cluster_available = bool(settings.cluster_base_url)
-    cluster_models = [{"id": settings.cluster_model, "label": settings.cluster_model}]
-    if settings.cluster_model_fast:
-        cluster_models.append({
-            "id": settings.cluster_model_fast,
-            "label": settings.cluster_model_fast,
-        })
+    cluster_models: list[dict] = []
+    if cluster_available:
+        try:
+            cluster_models = await _cluster_models()
+        except Exception:
+            cluster_models = []
+    if not cluster_models:
+        cluster_models = [{"id": settings.cluster_model, "label": settings.cluster_model}]
+        if settings.cluster_model_fast:
+            cluster_models.append({
+                "id": settings.cluster_model_fast,
+                "label": settings.cluster_model_fast,
+            })
     cluster_models, cluster_default = _mark_default(cluster_models, settings.cluster_model)
 
     return [
@@ -165,6 +224,13 @@ async def list_providers() -> list[ProviderInfo]:
 
 
 def get_provider(name: str) -> LLMProvider:
+    """
+    Create the provider adapter for a provider name.
+
+    :param name: "anthropic", "openai" or "cluster".
+    :return: The provider adapter.
+    :raises ValueError: If the provider is unknown or not configured.
+    """
     if name == "anthropic":
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY is not configured")

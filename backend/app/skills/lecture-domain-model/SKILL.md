@@ -27,7 +27,7 @@ Five node labels, parent → child only:
 
 | Label    | Attributes                                   | Role                              |
 |----------|----------------------------------------------|-----------------------------------|
-| Lecture  | name, id, code, degreeType, term, PO, prof   | the course                        |
+| Lecture  | name, id, code, degreeType, term, PO, ECTS, prof | the course                    |
 | Chapter  | name, index, id                              | one lecture unit / slide deck     |
 | Topic    | name, index, id                              | agenda item within a chapter      |
 | Subtopic | name, id                                     | grouping; **may nest recursively**|
@@ -94,6 +94,7 @@ something is a Concept or a droppable fact, **ask** (see below).
     "degreeType": "Master",
     "term": "2. Fachsemester",
     "PO": "2019",
+    "ECTS": 6,
     "prof": "Prof. Dr. Max Mustermann"
   },
   "chapter": { "name": "…", "index": 1 },
@@ -120,7 +121,7 @@ something is a Concept or a droppable fact, **ask** (see below).
 Use the AskUserQuestion tool whenever:
 
 - **Lecture metadata** is unknown or not on the slides: `code`, `degreeType`,
-  `term`, `PO`, `prof`, `chapter.index`.
+  `term`, `PO`, `ECTS` (credit points, an integer), `prof`, `chapter.index`.
 - **Granularity is ambiguous**: a heading could be a single Concept or a
   Subtopic with several Concepts (e.g. the "3 Vs", architecture layers).
 - A block is **borderline concept vs. droppable fact**.
@@ -194,9 +195,9 @@ A `:Slide` node has exactly these eight properties:
 
 | property      | type   | example                                              |
 | ------------- | ------ | ---------------------------------------------------- |
-| `id`          | string | `BDT_CH06_SL34`  (`<CODE>_CHNN_SL<pageNumber>`)       |
+| `id`          | string | `BDT_CH06_SL34`  (`<CODE>_CHNN_SL<pageNr>`)       |
 | `title`       | string | `Topics und Partitionen im Cluster (mehrere Broker)` |
-| `pageNumber`  | int    | `34`                                                 |
+| `pageNr`  | int    | `34`                                                 |
 | `source`      | string | `06-data-streams.pdf`                                |
 | `lecture`     | string | `BDT`                                                |
 | `chapter`     | string | `BDT_CH06`                                            |
@@ -224,7 +225,7 @@ EVERY property MUST be prefixed with `s.`; every statement ends with `;`:
 CREATE CONSTRAINT IF NOT EXISTS FOR (s:Slide) REQUIRE s.id IS UNIQUE;
 MERGE (s:Slide {id:'BDT_CH06_SL34'})
   SET s.title='Topics und Partitionen im Cluster (mehrere Broker)',
-      s.pageNumber=34, s.source='06-data-streams.pdf', s.lecture='BDT',
+      s.pageNr=34, s.source='06-data-streams.pdf', s.lecture='BDT',
       s.chapter='BDT_CH06', s.chapterIndex=6, s.chapterName='Data Streams & Zeitreihen';
 MATCH (s:Slide {id:'BDT_CH06_SL34'}), (c:Concept {id:'BDT_CH06_T01_C01'}) MERGE (s)-[:COVERS]->(c);
 ```

@@ -1,5 +1,7 @@
-"""PDF reading for provider-agnostic vision: extract text (pdfplumber) and render
-pages to PNG images (PyMuPDF, pure wheels -> no Poppler dependency)."""
+"""
+PDF reading for provider-agnostic vision: text is extracted with pdfplumber and
+pages are rendered to PNG with PyMuPDF, which ships as pure wheels and needs no Poppler.
+"""
 from __future__ import annotations
 
 import base64
@@ -13,7 +15,13 @@ from app.models.ai import TextBlock, ImageBlock
 
 
 def _parse_pages(pages: str | None, total: int) -> list[int]:
-    """0-based page indices for a '1-5' / '3' style range (1-based, inclusive)."""
+    """
+    Convert a 1-based, inclusive page range such as '1-5' or '3' into 0-based page indices.
+
+    :param pages: The page range, or None for all pages.
+    :param total: The number of pages in the document.
+    :return: The 0-based page indices, clamped to the document.
+    """
     if not pages:
         return list(range(total))
     pages = pages.strip()
@@ -28,6 +36,15 @@ def _parse_pages(pages: str | None, total: int) -> list[int]:
 
 
 def _render_page(doc: fitz.Document, index: int, dpi: int, max_edge: int) -> bytes:
+    """
+    Render one page to PNG, scaled down if its longest edge would exceed max_edge.
+
+    :param doc: The open PDF document.
+    :param index: The 0-based page index.
+    :param dpi: The render resolution.
+    :param max_edge: The maximum length of the longest image edge in pixels.
+    :return: The PNG image bytes.
+    """
     page = doc.load_page(index)
     zoom = dpi / 72.0
     rect = page.rect
@@ -39,7 +56,16 @@ def _render_page(doc: fitz.Document, index: int, dpi: int, max_edge: int) -> byt
 
 
 def read_pdf_blocks(path: Path, pages: str | None) -> list:
-    """Return a list of TextBlock / ImageBlock for the requested pages."""
+    """
+    Read the requested pages as text and image blocks for the model.
+
+    At most pdf_max_pages_per_batch pages are returned. If more were requested,
+    a leading notice tells the model to page on.
+
+    :param path: The path of the PDF file.
+    :param pages: The 1-based page range, or None for all pages.
+    :return: A TextBlock and an ImageBlock per page.
+    """
     blocks: list = []
     with fitz.open(path) as doc:
         total = doc.page_count

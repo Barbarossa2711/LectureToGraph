@@ -14,11 +14,17 @@ interface PipelineState {
   log: LogEntry[]
   vizReloadKey: number
 
+  /** Load the LLM providers for the setup form. */
   loadProviders: () => Promise<void>
+  /** Replace the current job; null returns to the setup form. */
   setJob: (job: JobSummary | null) => void
+  /** Reload the current job and redraw the graph when a validation gate is entered. */
   refreshJob: () => Promise<void>
+  /** Subscribe to the job's event stream, replacing any previous subscription. */
   connect: (jobId: string) => void
+  /** Append an entry to the progress log, which keeps about the last 200 entries. */
   pushLog: (entry: Omit<LogEntry, 'ts'>) => void
+  /** Make the graph view reload. */
   bumpViz: () => void
 }
 
@@ -40,7 +46,6 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     const fresh = await getJob(job.id)
     const prev = get().job
     set({ job: fresh })
-    // reload the graph when we (re-)enter a validation gate
     if (fresh.status === 'AWAITING_VALIDATION' && prev?.status !== 'AWAITING_VALIDATION') {
       get().bumpViz()
     }

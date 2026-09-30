@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { usePipelineStore } from '../store/pipelineStore'
 
+/**
+ * Scrolling log of the agent's messages, tool calls and errors.
+ *
+ * @returns The log.
+ */
 export default function ProgressLog() {
   const log = usePipelineStore((s) => s.log)
   const endRef = useRef<HTMLDivElement>(null)

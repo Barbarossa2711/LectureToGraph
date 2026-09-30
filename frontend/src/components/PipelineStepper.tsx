@@ -20,6 +20,12 @@ const STATUS_COLOR: Record<string, string> = {
   FAILED: '#dc2626',
 }
 
+/**
+ * Shows the three stages with the active one highlighted, plus status, chapter and error.
+ *
+ * @param job The job.
+ * @returns The stepper.
+ */
 export default function PipelineStepper({ job }: { job: JobSummary }) {
   const activeIdx = STAGES.findIndex((s) => s.key === job.stage)
 

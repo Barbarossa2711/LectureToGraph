@@ -21,11 +21,17 @@ from app.jobs.workspace import ensure_workspace
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
-# keep strong refs to background tasks so they aren't GC'd mid-run
+# Strong references keep background tasks from being garbage-collected mid-run.
 _tasks: set[asyncio.Task] = set()
 
 
 def _schedule(coro) -> None:
+    """
+    Run a coroutine as background task.
+
+    :param coro: The coroutine to run.
+    :return: None
+    """
     task = asyncio.create_task(coro)
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
@@ -58,6 +64,13 @@ class Neo4jUploadBody(BaseModel):
 
 
 def _require(job_id: str):
+    """
+    Look up a job for a request.
+
+    :param job_id: The job id.
+    :return: The job.
+    :raises HTTPException: 404 if the job is unknown.
+    """
     job = store.get(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
@@ -66,12 +79,26 @@ def _require(job_id: str):
 
 @router.post("")
 async def create_job(body: CreateJobBody):
+    """
+    Create a job.
+
+    :param body: Provider, model, optional lecture code and language.
+    :return: The job summary.
+    """
     job = store.create(body.provider, body.model, body.lecture_code, body.language)
     return JobSummary.of(job)
 
 
 @router.post("/{job_id}/language")
 async def set_language(job_id: str, body: LanguageBody):
+    """
+    Change the language the agent uses with the user.
+
+    :param job_id: The job id.
+    :param body: The language, "de" or "en".
+    :return: The job summary.
+    :raises HTTPException: 400 for any other language.
+    """
     job = _require(job_id)
     if body.language not in ("de", "en"):
         raise HTTPException(400, "language must be 'de' or 'en'")
@@ -81,10 +108,17 @@ async def set_language(job_id: str, body: LanguageBody):
 
 @router.post("/{job_id}/pdfs")
 async def upload_pdfs(job_id: str, files: list[UploadFile] = File(...)):
+    """
+    Store lecture PDFs in the job workspace.
+
+    :param job_id: The job id.
+    :param files: The uploaded PDFs.
+    :return: The stored file names.
+    """
     job = _require(job_id)
     saved = await save_uploads(job, files)
-    # only advance state on the initial upload; later uploads (adding a chapter)
-    # must not clobber an AWAITING_NEXT_CHAPTER / running state
+    # Only the first upload advances the status. A later upload for another
+    # chapter must not overwrite AWAITING_NEXT_CHAPTER or RUNNING.
     if job.status is JobStatus.CREATED:
         job.status = JobStatus.UPLOADED
     return {"saved": saved}
@@ -92,6 +126,13 @@ async def upload_pdfs(job_id: str, files: list[UploadFile] = File(...)):
 
 @router.post("/{job_id}/start")
 async def start_job(job_id: str):
+    """
+    Start the pipeline with the first chapter in the background.
+
+    :param job_id: The job id.
+    :return: The job summary.
+    :raises HTTPException: 400 if no PDF was uploaded.
+    """
     job = _require(job_id)
     if not job.uploaded_pdfs:
         raise HTTPException(400, "Upload at least one PDF first")
@@ -101,14 +142,34 @@ async def start_job(job_id: str):
 
 @router.get("/{job_id}")
 async def get_job(job_id: str):
+    """
+    Return the current state of a job.
+
+    :param job_id: The job id.
+    :return: The job summary.
+    """
     return JobSummary.of(_require(job_id))
 
 
 @router.get("/{job_id}/events")
 async def events(job_id: str):
+    """
+    Stream the job's events as server-sent events.
+
+    The stream starts with the current status and a pending question, if any,
+    so a reconnecting client can restore its state.
+
+    :param job_id: The job id.
+    :return: The event stream.
+    """
     _require(job_id)
 
     async def gen():
+        """
+        Yield the initial state, then every published event of the job.
+
+        :return: An async generator of SSE events.
+        """
         job = store.get(job_id)
         yield {"event": "status", "data": json.dumps(
             {"status": job.status.value, "stage": job.stage.value})}
@@ -122,6 +183,14 @@ async def events(job_id: str):
 
 @router.post("/{job_id}/answer")
 async def answer(job_id: str, body: AnswerBody):
+    """
+    Answer the agent's pending question and resume the stage in the background.
+
+    :param job_id: The job id.
+    :param body: The answers.
+    :return: The job summary.
+    :raises HTTPException: 409 if the job is not waiting for input.
+    """
     job = _require(job_id)
     if job.status is not JobStatus.AWAITING_USER_INPUT:
         raise HTTPException(409, "Job is not awaiting input")
@@ -131,6 +200,13 @@ async def answer(job_id: str, body: AnswerBody):
 
 @router.post("/{job_id}/gate/approve")
 async def approve(job_id: str):
+    """
+    Approve the current stage's result and continue in the background.
+
+    :param job_id: The job id.
+    :return: The job summary.
+    :raises HTTPException: 409 if the job is not waiting for validation.
+    """
     job = _require(job_id)
     if job.status is not JobStatus.AWAITING_VALIDATION:
         raise HTTPException(409, "Job is not awaiting validation")
@@ -140,6 +216,13 @@ async def approve(job_id: str):
 
 @router.post("/{job_id}/add-chapter")
 async def add_chapter(job_id: str):
+    """
+    Start processing the next chapter in the background.
+
+    :param job_id: The job id.
+    :return: The job summary.
+    :raises HTTPException: 409 if the job is not waiting for the next chapter.
+    """
     job = _require(job_id)
     if job.status is not JobStatus.AWAITING_NEXT_CHAPTER:
         raise HTTPException(409, "Job is not awaiting the next chapter")
@@ -149,6 +232,13 @@ async def add_chapter(job_id: str):
 
 @router.post("/{job_id}/finish")
 async def finish(job_id: str):
+    """
+    Mark the job as completed instead of adding another chapter.
+
+    :param job_id: The job id.
+    :return: The job summary.
+    :raises HTTPException: 409 if the job is not waiting for the next chapter.
+    """
     job = _require(job_id)
     if job.status is not JobStatus.AWAITING_NEXT_CHAPTER:
         raise HTTPException(409, "Job is not awaiting the next chapter")
@@ -158,6 +248,13 @@ async def finish(job_id: str):
 
 @router.post("/{job_id}/stage/rerun")
 async def rerun(job_id: str, body: RerunBody):
+    """
+    Discard the current stage's result and regenerate it in the background.
+
+    :param job_id: The job id.
+    :param body: Optional feedback for the new attempt.
+    :return: The job summary.
+    """
     job = _require(job_id)
     _schedule(runner.rerun_stage(job, body.feedback))
     return JobSummary.of(job)
@@ -165,6 +262,14 @@ async def rerun(job_id: str, body: RerunBody):
 
 @router.get("/{job_id}/artifact")
 async def download_artifact(job_id: str, path: str):
+    """
+    Download a file from the job workspace.
+
+    :param job_id: The job id.
+    :param path: The workspace-relative path.
+    :return: The file.
+    :raises HTTPException: 404 if the file does not exist.
+    """
     job = _require(job_id)
     p = artifact_path(job, path)
     if not p.exists():
@@ -174,6 +279,13 @@ async def download_artifact(job_id: str, path: str):
 
 @router.get("/{job_id}/full-cypher")
 async def full_cypher(job_id: str):
+    """
+    Download the lecture's current graph, including manual edits, as one Cypher file.
+
+    :param job_id: The job id.
+    :return: The Cypher file as attachment.
+    :raises HTTPException: 400 if no graph has been staged yet.
+    """
     job = _require(job_id)
     if not job.lecture_code:
         raise HTTPException(400, "No staged graph yet")
@@ -187,8 +299,15 @@ async def full_cypher(job_id: str):
 
 @router.post("/{job_id}/save-cypher")
 async def save_cypher(job_id: str):
-    """Persist the current graph (incl. manual edits) as a .cypher file in the job
-    workspace and register it as a downloadable artifact."""
+    """
+    Save the current graph, including manual edits, as .cypher file in the job workspace.
+
+    The file is registered as downloadable artifact.
+
+    :param job_id: The job id.
+    :return: The job summary.
+    :raises HTTPException: 400 if no graph has been staged yet.
+    """
     job = _require(job_id)
     if not job.lecture_code:
         raise HTTPException(400, "No staged graph yet")
@@ -203,15 +322,24 @@ async def save_cypher(job_id: str):
 
 
 def _browser_http_url() -> str:
-    """Derive the Neo4j Browser HTTP URL (port 7474) from the bolt browser URI."""
-    uri = settings.neo4j_browser_uri  # e.g. bolt://localhost:7687
+    """
+    Derive the Neo4j Browser URL (port 7474) from the bolt URI handed to the browser.
+
+    :return: The HTTP URL of the Neo4j Browser.
+    """
+    uri = settings.neo4j_browser_uri
     host = uri.split("://", 1)[-1].split(":", 1)[0] or "localhost"
     return f"http://{host}:7474"
 
 
 @router.get("/{job_id}/bundled-access")
 async def bundled_access(job_id: str):
-    """How to reach the bundled (Docker) Neo4j from the host."""
+    """
+    Describe how to reach the bundled Neo4j from the host.
+
+    :param job_id: The job id.
+    :return: Browser URL, bolt URI, user and password.
+    """
     _require(job_id)
     return {
         "browser_http": _browser_http_url(),
@@ -223,9 +351,16 @@ async def bundled_access(job_id: str):
 
 @router.post("/{job_id}/load-bundled")
 async def load_bundled(job_id: str):
-    """(Re)load the current graph (incl. manual edits) into the bundled Neo4j.
-    Idempotent — the staged graph already lives here, but this guarantees the DB
-    matches the exported Cypher (e.g. after a reset)."""
+    """
+    Load the current graph, including manual edits, into the bundled Neo4j again.
+
+    The staged graph already lives there; this is idempotent and guarantees the
+    database matches the exported Cypher, e.g. after a reset.
+
+    :param job_id: The job id.
+    :return: The load statistics and the Neo4j Browser URL.
+    :raises HTTPException: 400 if no graph has been staged yet.
+    """
     job = _require(job_id)
     if not job.lecture_code:
         raise HTTPException(400, "No staged graph yet")
@@ -236,8 +371,14 @@ async def load_bundled(job_id: str):
 
 @router.post("/{job_id}/upload-neo4j")
 async def upload_neo4j(job_id: str, body: Neo4jUploadBody):
-    """Push the current graph (incl. manual edits) into an external Neo4j using
-    the supplied credentials."""
+    """
+    Upload the current graph, including manual edits, into an external Neo4j.
+
+    :param job_id: The job id.
+    :param body: Bolt URI, credentials and optional database name.
+    :return: The upload statistics.
+    :raises HTTPException: 400 if no graph is staged or the upload fails.
+    """
     job = _require(job_id)
     if not job.lecture_code:
         raise HTTPException(400, "No staged graph yet")
@@ -252,6 +393,12 @@ async def upload_neo4j(job_id: str, body: Neo4jUploadBody):
 
 @router.get("/{job_id}/viz-config")
 async def viz_config(job_id: str):
+    """
+    Return the neovis.js configuration for the job's graph view.
+
+    :param job_id: The job id.
+    :return: Connection data, the query for the whole lecture and the query for the latest changes.
+    """
     job = _require(job_id)
     code = job.lecture_code or "__none__"
     initial_cypher = (

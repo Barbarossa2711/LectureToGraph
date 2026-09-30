@@ -5,6 +5,12 @@ import { usePipelineStore } from '../store/pipelineStore'
 import NodeEditForm from './NodeEditForm'
 import EdgeEditForm from './EdgeEditForm'
 
+/**
+ * Validation gate: approve the stage, regenerate it with feedback or edit nodes and edges by hand.
+ *
+ * @param job The job.
+ * @returns The panel.
+ */
 export default function ValidationPanel({ job }: { job: JobSummary }) {
   const { refreshJob } = usePipelineStore()
   const [feedback, setFeedback] = useState('')

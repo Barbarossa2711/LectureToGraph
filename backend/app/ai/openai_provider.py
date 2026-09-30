@@ -13,6 +13,12 @@ from app.models.ai import (
 
 
 def _image_part(block: ImageBlock) -> dict:
+    """
+    Convert an image block into an OpenAI image_url content part.
+
+    :param block: The image block.
+    :return: The content part with the image as a data URL.
+    """
     return {
         "type": "image_url",
         "image_url": {"url": f"data:{block.media_type};base64,{block.data_b64}"},
@@ -25,17 +31,20 @@ def _to_openai_messages(
     *,
     blank_assistant_content: bool = False,
 ) -> list[dict]:
-    """Flatten normalized messages into OpenAI chat messages.
+    """
+    Flatten normalized messages into OpenAI chat messages.
 
-    - assistant text + tool_use -> one assistant message with tool_calls
-    - tool_result blocks -> one role:"tool" message each (text only); any images
-      in a tool result are appended as a following role:"user" message, since the
-      OpenAI tool role does not accept image parts.
+    Assistant text and tool_use blocks become one assistant message with tool_calls.
+    Each tool_result becomes one role "tool" message with text only. Images from a
+    tool result follow as a role "user" message, since the tool role accepts no images.
 
-    ``blank_assistant_content`` writes "" instead of null for an assistant
-    message that carries only tool_calls. api.openai.com accepts null, but an
-    OpenWebUI gateway measures the length of that field and answers
-    400 "object of type 'NoneType' has no len()".
+    :param system: The system prompt, sent as the first message.
+    :param messages: The conversation in normalized form.
+    :param blank_assistant_content: Write "" instead of null for an assistant message
+        that carries only tool_calls. api.openai.com accepts null, but an OpenWebUI
+        gateway measures the field's length and answers
+        400 "object of type 'NoneType' has no len()".
+    :return: The messages in the OpenAI chat completions format.
     """
     out: list[dict] = [{"role": "system", "content": system}]
 
@@ -59,7 +68,6 @@ def _to_openai_messages(
             out.append(msg)
             continue
 
-        # user message: split tool_results from plain content
         plain_parts: list[dict] = []
         deferred_images: list[dict] = []
         for b in m.content:
@@ -90,12 +98,7 @@ def _to_openai_messages(
 
 
 class OpenAIProvider(LLMProvider):
-    """Adapter for api.openai.com and for any OpenAI-compatible endpoint.
-
-    The defaults reproduce the previous behaviour exactly; a private endpoint
-    is configured through ``base_url``, ``http_client`` (for a self-signed
-    certificate) and ``blank_assistant_content`` (gateway quirk).
-    """
+    """Adapter for api.openai.com and for any OpenAI-compatible endpoint."""
 
     name = "openai"
 
@@ -108,6 +111,16 @@ class OpenAIProvider(LLMProvider):
         blank_assistant_content: bool = False,
         name: str | None = None,
     ):
+        """
+        Create the OpenAI client. With the defaults it talks to api.openai.com.
+
+        :param api_key: The API key of the endpoint.
+        :param base_url: The base URL of an OpenAI-compatible endpoint, or None for api.openai.com.
+        :param http_client: A preconfigured HTTP client, e.g. to trust a self-signed certificate.
+        :param blank_assistant_content: Send "" instead of null as content of an assistant
+            message with only tool calls, as required by OpenWebUI gateways.
+        :param name: The provider name to report, or None for "openai".
+        """
         kwargs: dict = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
@@ -119,6 +132,16 @@ class OpenAIProvider(LLMProvider):
             self.name = name
 
     async def chat(self, *, system, messages, tools, model, max_tokens) -> LLMResponse:
+        """
+        Send one chat turn with tools to the chat completions endpoint.
+
+        :param system: The system prompt.
+        :param messages: The conversation so far in normalized form.
+        :param tools: The tools the model may call.
+        :param model: The model id of the endpoint.
+        :param max_tokens: The upper bound for generated tokens.
+        :return: The assistant message, the normalized stop reason and token usage.
+        """
         resp = await self._client.chat.completions.create(
             model=model,
             max_completion_tokens=max_tokens,

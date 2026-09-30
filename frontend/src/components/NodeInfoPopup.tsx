@@ -12,9 +12,16 @@ export interface SelectedNode {
   props: Record<string, unknown>
 }
 
-// properties that are part of the identity / hierarchy and shouldn't be hand-edited here
+// Properties that cannot be edited in the popup
 const READONLY_KEYS = new Set(['id'])
 
+/**
+ * Popup at the right-clicked node to view, edit and delete its properties.
+ *
+ * @param node The selected node with its position.
+ * @param onClose Called when the popup should close.
+ * @returns The popup.
+ */
 export default function NodeInfoPopup({
   node, onClose,
 }: { node: SelectedNode; onClose: () => void }) {
@@ -41,7 +48,7 @@ export default function NodeInfoPopup({
         if (READONLY_KEYS.has(k)) continue
         const orig = node.props[k]
         if (String(orig ?? '') === v) continue
-        // preserve numeric type when the original was a number
+        // Keep numbers numeric.
         changed[k] = typeof orig === 'number' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : v
       }
       if (Object.keys(changed).length === 0) { setMsg('Keine Änderungen.'); setBusy(false); return }
@@ -59,7 +66,7 @@ export default function NodeInfoPopup({
     catch (e: any) { setMsg(e?.response?.data?.detail ?? 'Fehler beim Löschen'); setBusy(false) }
   }
 
-  // keep the popup inside the viewport-ish (simple clamp)
+  // Roughly keep the popup inside the viewport.
   const left = Math.min(node.x + 12, window.innerWidth - 320)
   const top = Math.min(node.y + 12, window.innerHeight - 260)
 

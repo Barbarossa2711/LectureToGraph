@@ -7,6 +7,13 @@ router = APIRouter(prefix="/nodes", tags=["nodes"])
 
 @router.post("", response_model=NodeResponse, status_code=201)
 async def create_node(body: NodeCreate):
+    """
+    Create or update a node and link it to its parent with the matching hierarchy edge.
+
+    :param body: Id, node type, optional parent id and properties.
+    :return: The node.
+    :raises HTTPException: 404 if the parent is missing.
+    """
     label = body.node_type.value
     props = dict(body.properties)
     props["id"] = body.id
@@ -30,6 +37,14 @@ async def create_node(body: NodeCreate):
 
 @router.put("/{node_id}", response_model=NodeResponse)
 async def update_node(node_id: str, body: NodeUpdate):
+    """
+    Merge properties into a node. The id cannot be changed.
+
+    :param node_id: The node id.
+    :param body: The properties to set.
+    :return: The updated node.
+    :raises HTTPException: 404 if the node is missing.
+    """
     updates = {k: v for k, v in body.properties.items() if k != "id"}
     async with get_session() as session:
         result = await session.run(
@@ -44,6 +59,13 @@ async def update_node(node_id: str, body: NodeUpdate):
 
 @router.delete("/{node_id}", status_code=204)
 async def delete_node(node_id: str):
+    """
+    Delete a node with all its edges.
+
+    :param node_id: The node id.
+    :return: None
+    :raises HTTPException: 404 if the node is missing.
+    """
     async with get_session() as session:
         result = await session.run(
             "MATCH (n {id: $id}) DETACH DELETE n RETURN count(n) AS deleted", id=node_id,
@@ -54,6 +76,12 @@ async def delete_node(node_id: str):
 
 
 def _map_node(record) -> NodeResponse:
+    """
+    Convert a query record with node and labels into a response.
+
+    :param record: A record with the fields n and labels.
+    :return: The node response.
+    """
     node = record["n"]
     labels = record["labels"]
     node_label = next((l for l in labels if l in {t.value for t in NodeType}), labels[0])

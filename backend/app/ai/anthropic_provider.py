@@ -17,6 +17,12 @@ _STOP_MAP = {
 
 
 def _block_to_anthropic(block) -> dict:
+    """
+    Convert a normalized content block into an Anthropic content block.
+
+    :param block: A TextBlock, ImageBlock, ToolUseBlock or ToolResultBlock.
+    :return: The block in the Anthropic Messages API format.
+    """
     if isinstance(block, TextBlock):
         return {"type": "text", "text": block.text}
     if isinstance(block, ImageBlock):
@@ -37,12 +43,29 @@ def _block_to_anthropic(block) -> dict:
 
 
 class AnthropicProvider(LLMProvider):
+    """Adapter for the Anthropic Messages API."""
+
     name = "anthropic"
 
     def __init__(self, api_key: str):
+        """
+        Create the Anthropic client.
+
+        :param api_key: The Anthropic API key.
+        """
         self._client = AsyncAnthropic(api_key=api_key)
 
     async def chat(self, *, system, messages, tools, model, max_tokens) -> LLMResponse:
+        """
+        Send one chat turn with tools to the Anthropic Messages API.
+
+        :param system: The system prompt.
+        :param messages: The conversation so far in normalized form.
+        :param tools: The tools the model may call.
+        :param model: The Anthropic model id.
+        :param max_tokens: The upper bound for generated tokens.
+        :return: The assistant message, the normalized stop reason and token usage.
+        """
         resp = await self._client.messages.create(
             model=model,
             max_tokens=max_tokens,
@@ -63,7 +86,7 @@ class AnthropicProvider(LLMProvider):
                 out.append(TextBlock(text=block.text))
             elif block.type == "tool_use":
                 out.append(ToolUseBlock(id=block.id, name=block.name, input=dict(block.input)))
-            # thinking blocks (if ever enabled) are ignored on purpose
+            # Thinking blocks are dropped on purpose.
 
         return LLMResponse(
             assistant_message=Message(role="assistant", content=out),

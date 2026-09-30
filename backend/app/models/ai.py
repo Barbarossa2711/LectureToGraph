@@ -1,9 +1,10 @@
-"""Provider-agnostic, persistable representation of an agent conversation.
+"""
+Provider-agnostic, persistable representation of an agent conversation.
 
-The internal shape is intentionally Anthropic-flavoured (a list of typed content
-blocks, with tool_use / tool_result blocks) because it maps cleanly onto both the
-Anthropic and OpenAI wire formats. Each provider adapter converts to/from these
-types; the agent loop only ever sees these.
+The shape follows Anthropic (a list of typed content blocks with tool_use and
+tool_result blocks) because it maps cleanly onto both the Anthropic and the OpenAI
+wire format. Each provider adapter converts to and from these types; the agent
+loop only sees these.
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ class ToolUseBlock(BaseModel):
 class ToolResultBlock(BaseModel):
     type: Literal["tool_result"] = "tool_result"
     tool_use_id: str
-    # tool results may carry text and/or images (e.g. read_pdf)
+    # read_pdf returns images as well as text.
     content: list[Union["TextBlock", "ImageBlock"]] = Field(default_factory=list)
     is_error: bool = False
 
@@ -48,9 +49,19 @@ class Message(BaseModel):
     content: list[ContentBlock]
 
     def text_parts(self) -> str:
+        """
+        Join the text blocks of the message.
+
+        :return: The texts separated by newlines, or "" if there are none.
+        """
         return "\n".join(b.text for b in self.content if isinstance(b, TextBlock))
 
     def tool_uses(self) -> list[ToolUseBlock]:
+        """
+        Collect the tool calls of the message.
+
+        :return: The tool_use blocks in order.
+        """
         return [b for b in self.content if isinstance(b, ToolUseBlock)]
 
 

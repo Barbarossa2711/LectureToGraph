@@ -10,7 +10,7 @@ CREATE CONSTRAINT concept_id IF NOT EXISTS FOR (n:Concept) REQUIRE n.id IS UNIQU
 
 // --- Nodes ---
 MERGE (n:Lecture {id:'BDT'})
-  SET n.name='Big-Data-Technologien', n.code='BDT', n.degreeType='Master', n.term='2. Fachsemester', n.PO='2019', n.prof='Prof. Dr. Max Mustermann';
+  SET n.name='Big-Data-Technologien', n.code='BDT', n.degreeType='Master', n.term='2. Fachsemester', n.PO='2019', n.ECTS=6, n.prof='Prof. Dr. Max Mustermann';
 MERGE (n:Chapter {id:'BDT_CH01'})
   SET n.name='Architekturen & Relationale Anfrageverarbeitung', n.index=1;
 MERGE (n:Topic {id:'BDT_CH01_T01'})

@@ -10,6 +10,7 @@ Checks that matter for a tutoring knowledge graph:
   - PREREQUISITE and SAME_AS never describe the same pair (different meaning)
   - FACILITATOR never duplicates a PREREQUISITE or SAME_AS pair (either direction)
   - the COMBINED PREREQUISITE + FACILITATOR graph is acyclic
+  - cross-chapter edges always point from a later to an earlier chapter (never forward)
   - reports cross-chapter edges so you can eyeball them
 
 Exit code 0 when everything passes, 1 otherwise -- so it can gate a workflow.
@@ -21,7 +22,8 @@ Usage:
                          [--sameas "CYPHER_Kanten/same_as.cypher"]
 
 Globs may be repeated and are quoted in the shell. Chapter of a concept id is inferred from a
-'BDT_CHNN' style prefix (best-effort); if your ids differ, the cross-chapter report stays empty.
+'BDT_CHNN' style prefix (best-effort); ids without such a prefix are skipped by the
+chapter-direction check and the cross-chapter report.
 """
 import argparse, glob, re, sys
 from collections import defaultdict
@@ -30,12 +32,24 @@ CONCEPT_DEF = re.compile(r"MERGE \(n:Concept \{id:'([^']+)'\}\)")
 
 
 def edge_re(rel):
+    """
+    Build the pattern for a Concept -> Concept edge statement of one type.
+
+    :param rel: The relationship type.
+    :return: The compiled pattern capturing source and target id.
+    """
     return re.compile(
         r"\(a:Concept \{id:'([^']+)'\}\),\s*\(b:Concept \{id:'([^']+)'\}\)\s*"
         r"MERGE \(a\)-\[:" + rel + r"\]->\(b\)")
 
 
 def expand(globs):
+    """
+    Expand shell globs into a sorted list of file paths.
+
+    :param globs: The glob patterns, or None.
+    :return: The matching files, sorted per pattern.
+    """
     files = []
     for g in globs or []:
         files.extend(sorted(glob.glob(g)))
@@ -43,6 +57,12 @@ def expand(globs):
 
 
 def read_texts(files):
+    """
+    Read files as UTF-8; unreadable files are reported and skipped.
+
+    :param files: The file paths.
+    :return: The file contents.
+    """
     out = []
     for f in files:
         try:
@@ -53,11 +73,50 @@ def read_texts(files):
 
 
 def chapter_of(cid):
+    """
+    Infer the chapter from an id with a <CODE>_CHNN prefix.
+
+    :param cid: The node id.
+    :return: The chapter prefix, or "?" if the id has none.
+    """
     m = re.match(r"([A-Za-z]+_CH\d+)", cid)
     return m.group(1) if m else "?"
 
 
+def chapter_number(cid):
+    """
+    Infer the chapter number from an id with a <CODE>_CHNN prefix.
+
+    :param cid: The concept id.
+    :return: The chapter number, or None if the id has no chapter prefix.
+    """
+    m = re.match(r"[A-Za-z]+_CH(\d+)", cid)
+    return int(m.group(1)) if m else None
+
+
+def forward_edges(edges):
+    """
+    Find edges that point from an earlier to a later chapter.
+
+    :param edges: The edges as (source, target) tuples.
+    :return: The edges whose source chapter precedes their target chapter.
+    """
+    out = []
+    for a, b in edges:
+        ca, cb = chapter_number(a), chapter_number(b)
+        if ca is not None and cb is not None and ca < cb:
+            out.append((a, b))
+    return out
+
+
 def collect(globs, rel):
+    """
+    Collect all edges of one type from the matching files.
+
+    :param globs: The glob patterns of the edge files.
+    :param rel: The relationship type.
+    :return: The edges as (source id, target id) tuples.
+    """
     pat = edge_re(rel)
     edges = []
     for text in read_texts(expand(globs)):
@@ -66,6 +125,12 @@ def collect(globs, rel):
 
 
 def find_cycle(edges):
+    """
+    Search a directed graph for a cycle with depth-first search.
+
+    :param edges: The edges as (source, target) tuples.
+    :return: The first cycle found as a node list ending in its start node, or None.
+    """
     g = defaultdict(list)
     for a, b in edges:
         g[a].append(b)
@@ -73,6 +138,13 @@ def find_cycle(edges):
     cyc = []
 
     def dfs(u, st):
+        """
+        Visit a node and its successors; gray nodes on the stack reveal a cycle.
+
+        :param u: The node to visit.
+        :param st: The current path.
+        :return: True if a cycle was found.
+        """
         color[u] = 1
         st.append(u)
         for v in g[u]:
@@ -92,7 +164,15 @@ def find_cycle(edges):
 
 
 def basic_checks(name, edges, defined, ok_ref):
-    """ids defined, no dups, no self-loops. Returns updated ok flag."""
+    """
+    Check that all endpoints are defined concepts and that there are no duplicates or self-loops.
+
+    :param name: The relationship type, used in the output.
+    :param edges: The edges as (source, target) tuples.
+    :param defined: The ids of the defined Concept nodes.
+    :param ok_ref: Unused.
+    :return: True if all checks pass.
+    """
     ok = True
     missing = sorted({x for e in edges for x in e if x not in defined})
     if missing:
@@ -110,6 +190,11 @@ def basic_checks(name, edges, defined, ok_ref):
 
 
 def main():
+    """
+    Run all edge checks and exit with 0 if they pass, 1 otherwise.
+
+    :return: None
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--domain", action="append", required=True)
     ap.add_argument("--prereq", action="append", required=True)
@@ -137,13 +222,11 @@ def main():
         ok &= basic_checks("SAME_AS", same, defined, ok)
     print("-" * 64)
 
-    # PREREQUISITE acyclic
     cyc = find_cycle(pre)
     print(("FAIL  PREREQUISITE cycle: " + " -> ".join(cyc)) if cyc
           else "PASS  PREREQUISITE graph is acyclic (DAG)")
     ok &= cyc is None
 
-    # PREREQUISITE / SAME_AS disjoint
     same_un = set(same) | {(b, a) for a, b in same}
     ov = set(pre) & same_un
     print(("FAIL  PREREQUISITE∩SAME_AS: " + str(list(ov)[:5])) if ov
@@ -151,7 +234,6 @@ def main():
     ok &= not ov
 
     if fac:
-        # FACILITATOR must not duplicate PREREQUISITE or SAME_AS (either direction)
         pre_un = set(pre) | {(b, a) for a, b in pre}
         ovp = set(fac) & pre_un
         ovs = set(fac) & same_un
@@ -160,11 +242,18 @@ def main():
         print(("FAIL  FACILITATOR∩SAME_AS: " + str(list(ovs)[:5])) if ovs
               else "PASS  no FACILITATOR pair coincides with SAME_AS")
         ok &= not ovp and not ovs
-        # combined acyclic
         cyc2 = find_cycle(pre + fac)
         print(("FAIL  combined PREREQUISITE+FACILITATOR cycle: " + " -> ".join(cyc2)) if cyc2
               else "PASS  combined PREREQUISITE+FACILITATOR graph is acyclic (DAG)")
         ok &= cyc2 is None
+
+    for name, edges in (("PREREQUISITE", pre), ("FACILITATOR", fac), ("SAME_AS", same)):
+        if not edges:
+            continue
+        fwd = forward_edges(edges)
+        print(("FAIL  " + name + " points from an earlier to a later chapter: " + str(fwd[:5]))
+              if fwd else f"PASS  {name}: cross-chapter edges point from later to earlier chapters")
+        ok &= not fwd
 
     print("-" * 64)
     for name, edges in (("PREREQUISITE", pre), ("FACILITATOR", fac)):

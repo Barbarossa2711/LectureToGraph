@@ -1,6 +1,8 @@
-"""Maps each pipeline stage to its vendored skill assets and builds the system
-prompt the agent runs with (the SKILL.md body plus a repo-specific addendum that
-rebinds the skill's environment to our tool set and job workspace)."""
+"""
+Maps each pipeline stage to its vendored skill and builds the agent's system prompt:
+the SKILL.md body plus an addendum that maps the skill's environment onto this
+tool set and the job workspace.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,6 +13,8 @@ SKILLS_DIR = Path(__file__).resolve().parent
 
 
 class Stage(str, Enum):
+    """The three pipeline stages of a chapter."""
+
     DOMAIN = "DOMAIN"
     EDGES = "EDGES"
     QUESTIONS = "QUESTIONS"
@@ -18,20 +22,37 @@ class Stage(str, Enum):
 
 @dataclass(frozen=True)
 class SkillDef:
+    """A vendored skill and the scripts the agent may run from it."""
+
     name: str
     skill_dir: Path
     allowed_scripts: frozenset[str]
 
     @property
     def skill_md(self) -> Path:
+        """
+        The skill's instruction file.
+
+        :return: The path of SKILL.md.
+        """
         return self.skill_dir / "SKILL.md"
 
     @property
     def scripts_dir(self) -> Path:
+        """
+        The directory of the skill's scripts.
+
+        :return: The scripts directory.
+        """
         return self.skill_dir / "scripts"
 
     @property
     def references_dir(self) -> Path:
+        """
+        The directory of the skill's reference documents.
+
+        :return: The references directory.
+        """
         return self.skill_dir / "references"
 
 
@@ -55,7 +76,12 @@ STAGE_SKILLS: dict[Stage, SkillDef] = {
 
 
 def _strip_frontmatter(text: str) -> str:
-    """Drop a leading YAML front-matter block (--- ... ---)."""
+    """
+    Remove a leading YAML front matter block delimited by ---.
+
+    :param text: The Markdown text.
+    :return: The text without front matter.
+    """
     if text.startswith("---"):
         end = text.find("\n---", 3)
         if end != -1:
@@ -118,6 +144,14 @@ _LANG_DIRECTIVE = {
 
 
 def stage_system_prompt(stage: Stage, *, max_pages: int, language: str = "de") -> str:
+    """
+    Build the system prompt of a stage.
+
+    :param stage: The stage.
+    :param max_pages: The maximum number of pages read_pdf returns per call.
+    :param language: The language the agent uses with the user; unknown values fall back to "de".
+    :return: The skill body, the environment addendum and the language directive.
+    """
     skill = STAGE_SKILLS[stage]
     body = _strip_frontmatter(skill.skill_md.read_text(encoding="utf-8"))
     addendum = _ADDENDUM.format(

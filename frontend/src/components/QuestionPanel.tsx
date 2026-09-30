@@ -3,6 +3,13 @@ import type { AskUserPayload } from '../types/graph'
 import { answerQuestion } from '../api/client'
 import { usePipelineStore } from '../store/pipelineStore'
 
+/**
+ * Shows the agent's questions with answer options or free text and sends the answers.
+ *
+ * @param jobId The job id.
+ * @param payload The pending questions.
+ * @returns The panel.
+ */
 export default function QuestionPanel({ jobId, payload }: { jobId: string; payload: AskUserPayload }) {
   const { refreshJob } = usePipelineStore()
   const [answers, setAnswers] = useState<Record<string, string>>({})

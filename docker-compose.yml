@@ -39,7 +39,7 @@ services:
       # Optional private endpoint. Empty base URL -> provider stays hidden.
       CLUSTER_BASE_URL: ${CLUSTER_BASE_URL:-}
       CLUSTER_API_KEY: ${CLUSTER_API_KEY:-}
-      CLUSTER_MODEL: ${CLUSTER_MODEL:-moonshotai/Kimi-K2.7}
+      CLUSTER_MODEL: ${CLUSTER_MODEL:-ultrabrain}
       CLUSTER_CA_BUNDLE: ${CLUSTER_CA_BUNDLE:-}
       CLUSTER_VERIFY_SSL: ${CLUSTER_VERIFY_SSL:-true}
     volumes:

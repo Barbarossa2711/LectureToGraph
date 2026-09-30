@@ -14,8 +14,8 @@ const STAGE_LAST_LABEL: Record<Stage, string> = {
   QUESTIONS: 'Wiederholungsfragen',
 }
 
-// node depth for the hierarchical layout (only the lecture STRUCTURE drives the
-// arrangement; semantic edges PREREQUISITE/FACILITATOR/TESTS do not — see below)
+// Node depth in the hierarchical layout. Only the lecture structure drives the
+// arrangement; semantic edges such as PREREQUISITE do not (see SEMANTIC_EDGES).
 const NODE_LEVELS: Record<NodeType, number> = {
   Lecture: 0, Chapter: 1, Topic: 2, Subtopic: 3, Concept: 4, Question: 5, Slide: 6,
 }
@@ -29,13 +29,19 @@ interface Props {
 
 const CONTAINER_ID = 'neovis-container'
 
-// vis-network item keys that are not Neo4j node properties
+// vis-network item keys that are no Neo4j node properties
 const VIS_KEYS = new Set([
   'id', 'label', 'group', 'title', 'shape', 'size', 'color', 'font', 'borderWidth',
   'image', 'x', 'y', 'raw', 'value', 'mass', 'hidden', 'physics', 'shapeProperties',
   'chosen', 'icon', 'level',
 ])
 
+/**
+ * Read the Neo4j properties of a vis-network node.
+ *
+ * @param item The vis-network node.
+ * @returns The node properties.
+ */
 function extractNodeProps(item: any): Record<string, unknown> {
   if (item?.raw?.properties) return item.raw.properties
   const out: Record<string, unknown> = {}
@@ -43,25 +49,41 @@ function extractNodeProps(item: any): Record<string, unknown> {
   return out
 }
 
+/**
+ * Read the Neo4j label of a vis-network node.
+ *
+ * @param item The vis-network node.
+ * @returns The first label, or '' if unknown.
+ */
 function nodeLabelOf(item: any): string {
   return item?.raw?.labels?.[0] ?? item?.group ?? ''
 }
 
+/**
+ * Read the Neo4j id of a vis-network node.
+ *
+ * @param item The vis-network node.
+ * @returns The id property, or the vis-network id as fallback.
+ */
 function nodeIdOf(item: any): string {
   return String(item?.raw?.properties?.id ?? item?.id ?? '')
 }
 
+/**
+ * Extract the chapter prefix <CODE>_CHNN from a node id.
+ *
+ * @param id The node id.
+ * @returns The prefix, or null if the id has none.
+ */
 function chapterPrefixOf(id: string): string | null {
   const m = CHAPTER_RE.exec(id)
   return m ? m[1] : null
 }
 
-// The semantic concept/question/slide edges describe meaning, not the structural
-// hierarchy — they're excluded from physics (physics: false) so they don't distort
-// the tree layout. Visibility is controlled per-type via the filter panel.
+// Semantic edges describe meaning, not the hierarchy. They are excluded from the
+// physics simulation so they do not distort the tree layout.
 const SEMANTIC_EDGES = new Set<EdgeType>(['PREREQUISITE', 'FACILITATOR', 'SAME_AS', 'TESTS', 'COVERS'])
 
-// width / dashes / show-label / physics per edge type
 const EDGE_STYLE: Record<EdgeType, { width: number; dashes?: boolean; label?: boolean; physics?: boolean }> = {
   HAS_CHAPTER: { width: 1 },
   HAS_TOPIC: { width: 1 },
@@ -75,6 +97,13 @@ const EDGE_STYLE: Record<EdgeType, { width: number; dashes?: boolean; label?: bo
   COVERS: { width: 1, dashes: true },
 }
 
+/**
+ * Hide the nodes of the filtered types and chapters and show all others.
+ *
+ * @param net The vis-network instance.
+ * @param hiddenTypes The hidden node labels.
+ * @param hiddenChapters The hidden chapter prefixes.
+ */
 function applyNodeVisibility(net: any, hiddenTypes: Set<string>, hiddenChapters: Set<string>): void {
   const ds = net?.body?.data?.nodes
   if (!ds) return
@@ -86,6 +115,12 @@ function applyNodeVisibility(net: any, hiddenTypes: Set<string>, hiddenChapters:
   if (updates.length) ds.update(updates)
 }
 
+/**
+ * Hide the edges of the filtered types and show all others.
+ *
+ * @param net The vis-network instance.
+ * @param hidden The hidden relationship types.
+ */
 function applyEdgeVisibility(net: any, hidden: Set<string>): void {
   const ds = net?.body?.data?.edges
   if (!ds) return
@@ -93,12 +128,20 @@ function applyEdgeVisibility(net: any, hidden: Set<string>): void {
   if (updates.length) ds.update(updates)
 }
 
+/**
+ * Renders the lecture graph from Neo4j with neovis.js, with filters, layout switch and a
+ * right-click popup to edit nodes.
+ *
+ * @param jobId The job id.
+ * @param reloadKey Changing this value redraws the graph.
+ * @returns The graph view.
+ */
 export default function GraphView({ jobId, reloadKey }: Props) {
   const vizRef = useRef<any>(null)
   const netRef = useRef<any>(null)
   const [selected, setSelected] = useState<SelectedNode | null>(null)
 
-  // per-type / per-chapter visibility filters (a key in the set is HIDDEN)
+  // Visibility filters: a key in a set is hidden.
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
   const [hiddenEdges, setHiddenEdges] = useState<Set<string>>(new Set())
   const [hiddenChapters, setHiddenChapters] = useState<Set<string>>(new Set())
@@ -108,16 +151,14 @@ export default function GraphView({ jobId, reloadKey }: Props) {
   const [chapters, setChapters] = useState<{ id: string; name: string; index: number }[]>([])
   const [filterOpen, setFilterOpen] = useState(false)
 
-  // layout mode (force-directed vs. hierarchical tree)
   const [hierarchical, setHierarchical] = useState(false)
 
-  // "only latest changes" scoped view
+  // "Only latest changes" view
   const cfgRef = useRef<{ full: string; last: string | null }>({ full: '', last: null })
   const [lastOnly, setLastOnly] = useState(false)
   const lastOnlyRef = useRef(false)
   const [lastStage, setLastStage] = useState<Stage | null>(null)
 
-  // re-apply visibility whenever a filter flips
   useEffect(() => {
     hiddenNodesRef.current = hiddenNodes
     applyNodeVisibility(netRef.current, hiddenNodes, hiddenChaptersRef.current)
@@ -208,7 +249,6 @@ export default function GraphView({ jobId, reloadKey }: Props) {
             shape: 'dot',
             size: 16,
             borderWidth: 2,
-            // node caption sits below the dot — keep it dark and readable
             font: { size: 13, color: '#1e293b', strokeWidth: 4, strokeColor: '#ffffff' },
           },
           edges: {
@@ -218,8 +258,8 @@ export default function GraphView({ jobId, reloadKey }: Props) {
               : { enabled: true, type: 'dynamic' },
           },
           groups,
-          // hierarchical layout: levels (above) drive the arrangement, physics off
-          // so the semantic edges (PREREQUISITE/FACILITATOR/TESTS) don't move nodes
+          // In the hierarchical layout the levels arrange the nodes; physics is off
+          // so semantic edges do not move them.
           physics: hierarchical ? { enabled: false } : { stabilization: { iterations: 150 } },
           layout: hierarchical
             ? {
@@ -249,7 +289,7 @@ export default function GraphView({ jobId, reloadKey }: Props) {
         vizRef.current = viz
         viz.render()
 
-        // once the graph is (re)drawn, re-apply filters, collect chapters, wire right-click
+        // After each draw: re-apply filters, collect chapters, bind the right-click popup.
         viz.registerOnEvent?.('completed', () => {
           const net = viz.network
           if (!net) return
@@ -257,7 +297,6 @@ export default function GraphView({ jobId, reloadKey }: Props) {
           applyNodeVisibility(net, hiddenNodesRef.current, hiddenChaptersRef.current)
           applyEdgeVisibility(net, hiddenEdgesRef.current)
 
-          // build the chapter list from the Chapter nodes currently in the graph
           const chs: { id: string; name: string; index: number }[] = []
           for (const nd of net.body.data.nodes.get()) {
             if (nodeLabelOf(nd) !== 'Chapter') continue
@@ -280,8 +319,8 @@ export default function GraphView({ jobId, reloadKey }: Props) {
             const item = net.body.data.nodes.get(nodeId)
             const props = extractNodeProps(item)
             const lbl = nodeLabelOf(item)
-            // pointer.DOM is relative to the graph container, which fills <main>
-            // (the positioned ancestor the popup is absolutely placed against)
+            // pointer.DOM is relative to the graph container, which fills <main>,
+            // the positioned ancestor of the popup.
             setSelected({
               x: params.pointer.DOM.x,
               y: params.pointer.DOM.y,

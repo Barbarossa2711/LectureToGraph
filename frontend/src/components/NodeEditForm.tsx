@@ -4,6 +4,11 @@ import type { NodeType } from '../types/graph'
 import { createNode, deleteNode } from '../api/client'
 import { usePipelineStore } from '../store/pipelineStore'
 
+/**
+ * Form to add, change or delete a node by id.
+ *
+ * @returns The form.
+ */
 export default function NodeEditForm() {
   const bumpViz = usePipelineStore((s) => s.bumpViz)
   const [id, setId] = useState('')

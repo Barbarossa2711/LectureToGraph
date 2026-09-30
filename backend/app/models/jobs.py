@@ -33,35 +33,45 @@ class Job(BaseModel):
     stage: Stage = Stage.DOMAIN
     status: JobStatus = JobStatus.CREATED
 
-    # chapter currently being processed (the pipeline runs one chapter at a time)
+    # The pipeline processes one chapter at a time.
     chapter_no: int = 1
 
     conversation: list[Message] = Field(default_factory=list)
     pending_question: dict | None = None
     resume_tool_use_id: str | None = None
-    # tool results already computed for other tools in the same batch as a pending ask_user
+    # Results of the other tool calls in the same turn as a pending ask_user
     pending_results: list[ToolResultBlock] = Field(default_factory=list)
 
-    # stage value -> list of workspace-relative artifact paths (accumulated across chapters)
+    # Stage value -> workspace-relative artifact paths, accumulated across chapters
     artifacts: dict[str, list[str]] = Field(default_factory=dict)
-    # artifacts produced by the most recent stage_complete (what to load now)
+    # Artifacts of the most recent stage_complete, i.e. what to load next
     last_artifacts: list[str] = Field(default_factory=list)
-    # the stage whose changes are currently the "latest" (for the scoped graph view)
+    # Stage whose changes the graph view highlights as the latest
     last_loaded_stage: Stage | None = None
     error: str | None = None
     uploaded_pdfs: list[str] = Field(default_factory=list)
 
     @property
     def workspace(self) -> Path:
+        """
+        The job's directory for uploads and generated artifacts.
+
+        :return: The workspace path.
+        """
         return settings.workspace_dir / self.id
 
     def next_stage(self) -> Stage | None:
+        """
+        Determine the stage after the current one.
+
+        :return: The next stage, or None after the last stage.
+        """
         i = STAGE_ORDER.index(self.stage)
         return STAGE_ORDER[i + 1] if i + 1 < len(STAGE_ORDER) else None
 
 
 class JobSummary(BaseModel):
-    """The client-facing view (omits the full conversation)."""
+    """The client-facing view of a job, without the conversation."""
     id: str
     provider: str
     model: str
@@ -78,6 +88,12 @@ class JobSummary(BaseModel):
 
     @classmethod
     def of(cls, job: Job) -> "JobSummary":
+        """
+        Build the summary of a job.
+
+        :param job: The job.
+        :return: The summary.
+        """
         return cls(
             id=job.id, provider=job.provider, model=job.model,
             lecture_code=job.lecture_code, language=job.language,

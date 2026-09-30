@@ -1,6 +1,8 @@
-"""Pipeline orchestration: drive a job across the three stages of ONE chapter at
-a time, pausing at ask_user and validation gates, loading each stage's cypher into
-Neo4j. After a chapter's questions are approved the job offers another chapter."""
+"""
+Pipeline orchestration: drives a job through the three stages of one chapter at a
+time, pauses at ask_user and at validation gates and loads each stage's Cypher into
+Neo4j. Once a chapter's questions are approved, the job offers another chapter.
+"""
 from __future__ import annotations
 
 import re
@@ -20,26 +22,45 @@ _LECTURE_RE = re.compile(r"MERGE \(n:Lecture \{id:'([^']+)'\}\)")
 
 
 async def _set_status(job: Job, status: JobStatus) -> None:
+    """
+    Set the job status and publish it.
+
+    :param job: The job.
+    :param status: The new status.
+    :return: None
+    """
     job.status = status
     await bus.publish(job.id, "status", {"status": status.value, "stage": job.stage.value})
 
 
 async def _fail(job: Job, e: Exception) -> None:
+    """
+    Record an error on the job, publish it and mark the job as failed.
+
+    :param job: The job.
+    :param e: The exception that ended the stage.
+    :return: None
+    """
     job.error = f"{type(e).__name__}: {e}"
     await bus.publish(job.id, "error", {"message": job.error})
     await _set_status(job, JobStatus.FAILED)
 
 
 async def _seed_stage(job: Job) -> None:
-    """Prepare workspace + the kickoff message for the current stage/chapter."""
+    """
+    Prepare the workspace and start a new conversation for the current stage and chapter.
+
+    If the lecture exists, its current domain model is written to domain.cypher so
+    later chapters and stages see the existing nodes. The domain stage additionally
+    gets slides.cypher, so it reuses slides of earlier chapters instead of duplicating them.
+
+    :param job: The job.
+    :return: None
+    """
     ensure_workspace(job)
-    # whenever a lecture already exists, expose its current domain to the agent
-    # (so additional chapters and the edge/question stages see existing nodes)
     if job.lecture_code:
         domain = await cl.export_domain_cypher(job.lecture_code)
         (job.workspace / "domain.cypher").write_text(domain, encoding="utf-8")
-        # the domain stage now also creates slides; expose the slides that already
-        # exist (from earlier chapters) so it reuses their ids instead of duplicating
         if job.stage is Stage.DOMAIN:
             slides = await cl.export_slides_cypher(job.lecture_code)
             (job.workspace / "slides.cypher").write_text(slides, encoding="utf-8")
@@ -49,7 +70,12 @@ async def _seed_stage(job: Job) -> None:
 
 
 async def run_stage(job: Job) -> None:
-    """Run the current stage to its next pause (question / validation / failure)."""
+    """
+    Run the current stage until it asks a question, awaits validation or fails.
+
+    :param job: The job.
+    :return: None
+    """
     try:
         await _set_status(job, JobStatus.RUNNING)
         provider = get_provider(job.provider)
@@ -61,6 +87,13 @@ async def run_stage(job: Job) -> None:
 
 
 async def resume(job: Job, answers: dict) -> None:
+    """
+    Continue a paused stage with the user's answers.
+
+    :param job: The job waiting for input.
+    :param answers: The answers to the pending question.
+    :return: None
+    """
     try:
         job.conversation.append(build_answer_message(job, answers))
         await _set_status(job, JobStatus.RUNNING)
@@ -73,6 +106,16 @@ async def resume(job: Job, answers: dict) -> None:
 
 
 async def _drive(job: Job, provider, system: str) -> None:
+    """
+    Run the agent loop and set the job status from its outcome.
+
+    When the stage completes, its Cypher artifacts are loaded into Neo4j.
+
+    :param job: The job.
+    :param provider: The LLM provider.
+    :param system: The system prompt of the stage.
+    :return: None
+    """
     emit = bus.emitter(job.id)
     outcome = await run_until_pause(job, provider, system, emit)
 
@@ -87,14 +130,23 @@ async def _drive(job: Job, provider, system: str) -> None:
             await _set_status(job, JobStatus.FAILED)
             return
         await _set_status(job, JobStatus.AWAITING_VALIDATION)
-    else:  # FAILED / MAX_TURNS
+    else:
         await _set_status(job, JobStatus.FAILED)
 
 
 async def _load_stage_artifacts(job: Job) -> None:
+    """
+    Load the Cypher files of the completed stage into Neo4j.
+
+    The lecture code is taken from the first domain model. After the domain stage,
+    slides without a COVERS edge (table of contents, agenda, ...) are deleted.
+
+    :param job: The job.
+    :return: None
+    """
     for rel in job.last_artifacts:
         if not rel.lower().endswith(".cypher"):
-            continue  # ignore intermediate artifacts like the structure.json
+            continue
         p = artifact_path(job, rel)
         if not p.exists():
             continue
@@ -105,8 +157,6 @@ async def _load_stage_artifacts(job: Job) -> None:
                 job.lecture_code = m.group(1)
         await cl.load_cypher_text(text)
     job.last_loaded_stage = job.stage
-    # the domain stage also creates slides — drop content-less ones (no COVERS edge),
-    # e.g. table-of-contents / agenda slides, so no free-standing Slide nodes remain
     if job.stage is Stage.DOMAIN and job.lecture_code:
         removed = await cl.delete_orphan_slides_in_chapter(job.lecture_code, job.chapter_no)
         if removed:
@@ -115,8 +165,14 @@ async def _load_stage_artifacts(job: Job) -> None:
 
 
 async def _consolidate_chapter(job: Job) -> None:
-    """Write the single consolidated `<CODE>_CHNN.cypher` for the finished chapter
-    and collapse the download list so only ONE .cypher per chapter is offered."""
+    """
+    Write one consolidated <CODE>_CHNN.cypher for the finished chapter.
+
+    The download list is reduced to these files, so one .cypher per chapter is offered.
+
+    :param job: The job.
+    :return: None
+    """
     code = job.lecture_code
     if not code:
         return
@@ -131,10 +187,17 @@ async def _consolidate_chapter(job: Job) -> None:
 
 
 async def approve_gate(job: Job) -> None:
+    """
+    Continue after the user approved a stage.
+
+    After the last stage the chapter is consolidated and the job waits for the next chapter.
+
+    :param job: The job.
+    :return: None
+    """
     try:
         nxt = job.next_stage()
         if nxt is None:
-            # finished this chapter -> consolidate to one file, then offer another chapter
             await _consolidate_chapter(job)
             await _set_status(job, JobStatus.AWAITING_NEXT_CHAPTER)
             return
@@ -147,7 +210,12 @@ async def approve_gate(job: Job) -> None:
 
 
 async def add_chapter(job: Job) -> None:
-    """Start the next chapter: re-enter the DOMAIN stage additively."""
+    """
+    Start the next chapter with the domain stage; existing chapters are kept.
+
+    :param job: The job.
+    :return: None
+    """
     try:
         job.chapter_no += 1
         job.stage = Stage.DOMAIN
@@ -160,10 +228,23 @@ async def add_chapter(job: Job) -> None:
 
 
 async def finish(job: Job) -> None:
+    """
+    Mark the job as completed.
+
+    :param job: The job.
+    :return: None
+    """
     await _set_status(job, JobStatus.COMPLETED)
 
 
 async def rerun_stage(job: Job, feedback: str | None) -> None:
+    """
+    Regenerate the current stage; errors mark the job as failed.
+
+    :param job: The job.
+    :param feedback: Optional user feedback for the new attempt.
+    :return: None
+    """
     try:
         await _rerun_stage(job, feedback)
     except Exception as e:  # noqa: BLE001
@@ -171,6 +252,13 @@ async def rerun_stage(job: Job, feedback: str | None) -> None:
 
 
 async def _rerun_stage(job: Job, feedback: str | None) -> None:
+    """
+    Delete what the current stage created in this chapter and run the stage again.
+
+    :param job: The job.
+    :param feedback: Optional user feedback, appended to the kickoff message.
+    :return: None
+    """
     code = job.lecture_code
     if code:
         if job.stage is Stage.DOMAIN:
@@ -192,6 +280,12 @@ async def _rerun_stage(job: Job, feedback: str | None) -> None:
 
 
 async def start(job: Job) -> None:
+    """
+    Start the pipeline with the domain stage of the first chapter.
+
+    :param job: The job.
+    :return: None
+    """
     try:
         job.stage = Stage.DOMAIN
         job.chapter_no = 1

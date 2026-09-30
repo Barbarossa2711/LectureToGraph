@@ -3,6 +3,12 @@ import type { JobSummary } from '../types/graph'
 import { artifactUrl, fullCypherUrl, saveCypher } from '../api/client'
 import { usePipelineStore } from '../store/pipelineStore'
 
+/**
+ * Buttons to save and download the graph as Cypher, plus the list of generated files.
+ *
+ * @param job The job.
+ * @returns The export section, or null before anything was generated.
+ */
 export default function ExportButtons({ job }: { job: JobSummary }) {
   const { setJob } = usePipelineStore()
   const [saving, setSaving] = useState(false)

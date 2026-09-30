@@ -28,6 +28,12 @@ HASQ = re.compile(r"\(ch:Chapter \{id:'([^']+)'\}\), \(q:Question\)")
 
 
 def expand(globs):
+    """
+    Expand shell globs into a sorted list of file paths.
+
+    :param globs: The glob patterns.
+    :return: The matching files, sorted per pattern.
+    """
     out = []
     for g in globs:
         out.extend(sorted(glob.glob(g)))
@@ -35,11 +41,22 @@ def expand(globs):
 
 
 def chapter_of(cid):
+    """
+    Infer the chapter from an id with a <CODE>_CHNN prefix.
+
+    :param cid: The node id.
+    :return: The chapter prefix, or "?" if the id has none.
+    """
     m = re.match(r"([A-Za-z]+_CH\d+)", cid)
     return m.group(1) if m else "?"
 
 
 def main():
+    """
+    Run all question checks and exit with 0 if the hard checks pass, 1 otherwise.
+
+    :return: None
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--domain", action="append", required=True)
     ap.add_argument("--questions", action="append", required=True)
@@ -69,7 +86,6 @@ def main():
           else "PASS  every TESTS target is a defined Concept")
     ok &= not missing
 
-    # HAS_QUESTION present for every chapter that has questions
     q_chapters = {chapter_of(q) for q in qnodes}
     missing_hasq = sorted(q_chapters - hasq_chapters)
     print(("FAIL  chapters with questions but no HAS_QUESTION block: " + str(missing_hasq))
@@ -84,7 +100,6 @@ def main():
     print(f"INFO  cross-chapter TESTS ({len(cross)}):")
     for q, c in cross:
         print(f"        {q} -> {c}")
-    # per-question TESTS count
     cnt = defaultdict(int)
     for q, _ in tests:
         cnt[q] += 1

@@ -134,7 +134,7 @@ export const NODE_COLORS: Record<NodeType, string> = {
   Slide: '#475569',
 }
 
-// node size decreases gently down the hierarchy; questions/slides are smallest
+// Node size decreases down the hierarchy; questions and slides are smallest.
 export const NODE_SIZES: Record<NodeType, number> = {
   Lecture: 24,
   Chapter: 21,
@@ -145,7 +145,7 @@ export const NODE_SIZES: Record<NodeType, number> = {
   Slide: 12,
 }
 
-// distinct colour per edge type; PREREQUISITE is emphasised (see GraphView)
+// PREREQUISITE is additionally emphasised by its width in GraphView.
 export const EDGE_COLORS: Record<EdgeType, string> = {
   HAS_CHAPTER: '#38bdf8',
   HAS_TOPIC: '#34d399',

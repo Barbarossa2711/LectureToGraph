@@ -1,5 +1,7 @@
-"""Execute multi-statement .cypher files against the staging Neo4j, and the
-scoped reset/export helpers the pipeline needs between stages."""
+"""
+Executes multi-statement .cypher files against Neo4j and provides the lecture- and
+chapter-scoped delete and export helpers the pipeline needs between stages.
+"""
 from __future__ import annotations
 
 import re
@@ -9,19 +11,32 @@ from neo4j import AsyncGraphDatabase
 
 from app.db.neo4j import get_driver
 
-# From inside the backend container, the user's host (e.g. Neo4j Desktop) is not
-# at 127.0.0.1 — that's the container itself. Docker exposes the host as
-# host.docker.internal (enabled via extra_hosts in docker-compose).
+# Inside the backend container, 127.0.0.1 is the container itself, not the user's
+# host (e.g. Neo4j Desktop). Docker exposes the host as host.docker.internal
+# (enabled via extra_hosts in docker-compose).
 _LOCALHOST_RE = re.compile(r"(://)(127\.0\.0\.1|localhost)(?=[:/]|$)")
 
 
 def rewrite_host_for_container(uri: str) -> str:
+    """
+    Replace localhost or 127.0.0.1 in a URI with host.docker.internal.
+
+    :param uri: The Neo4j URI entered by the user.
+    :return: The URI reachable from inside the container.
+    """
     return _LOCALHOST_RE.sub(r"\1host.docker.internal", uri)
 
 
 def split_statements(text: str) -> list[str]:
-    """Split a .cypher file into statements, honouring single-quoted strings
-    (with backslash escapes) and stripping `//` line comments."""
+    """
+    Split a .cypher file into statements at semicolons.
+
+    Semicolons inside single-quoted strings (with backslash escapes) are kept;
+    // line comments are removed.
+
+    :param text: The Cypher text.
+    :return: The non-empty statements without trailing semicolon.
+    """
     stmts: list[str] = []
     buf: list[str] = []
     in_str = False
@@ -40,7 +55,6 @@ def split_statements(text: str) -> list[str]:
                 in_str = False
             i += 1
             continue
-        # not in a string
         if ch == "/" and i + 1 < n and text[i + 1] == "/":
             j = text.find("\n", i)
             i = n if j == -1 else j
@@ -66,14 +80,25 @@ def split_statements(text: str) -> list[str]:
 
 
 def _is_constraint(stmt: str) -> bool:
+    """
+    Check whether a statement creates a constraint.
+
+    :param stmt: The Cypher statement.
+    :return: True for CREATE CONSTRAINT statements.
+    """
     return stmt.lstrip().upper().startswith("CREATE CONSTRAINT")
 
 
 async def load_cypher_text(text: str, *, driver=None, database: str | None = None) -> dict:
-    """Load constraints (auto-commit) then data MERGEs (single write tx).
+    """
+    Run a Cypher document: first the constraints in auto-commit mode, then all other
+    statements in one write transaction.
 
-    Defaults to the bundled staging driver; pass `driver`/`database` to load into
-    an arbitrary Neo4j (used by the optional external-upload feature)."""
+    :param text: The Cypher text.
+    :param driver: The target driver, or None for the bundled staging database.
+    :param database: The target database, or None for the default database.
+    :return: The number of constraints and of other statements.
+    """
     statements = split_statements(text)
     constraints = [s for s in statements if _is_constraint(s)]
     data = [s for s in statements if not _is_constraint(s)]
@@ -85,6 +110,12 @@ async def load_cypher_text(text: str, *, driver=None, database: str | None = Non
             await session.run(c)
 
         async def _write(tx):
+            """
+            Run all data statements in the given transaction.
+
+            :param tx: The write transaction.
+            :return: None
+            """
             for s in data:
                 await tx.run(s)
 
@@ -95,15 +126,28 @@ async def load_cypher_text(text: str, *, driver=None, database: str | None = Non
 
 
 async def load_cypher_file(path: Path) -> dict:
+    """
+    Run a .cypher file against the staging database.
+
+    :param path: The path of the file.
+    :return: The number of constraints and of other statements.
+    """
     return await load_cypher_text(path.read_text(encoding="utf-8"))
 
 
 async def upload_to_external(
     uri: str, user: str, password: str, text: str, database: str | None = None
 ) -> dict:
-    """Load a cypher document into an external Neo4j using user-supplied creds.
+    """
+    Load a Cypher document into an external Neo4j with a temporary driver.
 
-    Opens a throw-away driver, verifies connectivity, loads, and closes it."""
+    :param uri: The bolt URI; localhost is rewritten to reach the Docker host.
+    :param user: The user name.
+    :param password: The password.
+    :param text: The Cypher text.
+    :param database: The target database, or None for the default database.
+    :return: The number of constraints and of other statements.
+    """
     driver = AsyncGraphDatabase.driver(rewrite_host_for_container(uri), auth=(user, password))
     try:
         await driver.verify_connectivity()
@@ -112,9 +156,13 @@ async def upload_to_external(
         await driver.close()
 
 
-# ── scoped reset / export helpers (scope = lecture.code id prefix) ───────────
-
 async def delete_scope(code: str) -> None:
+    """
+    Delete every node of a lecture, i.e. every node whose id starts with its code.
+
+    :param code: The lecture code.
+    :return: None
+    """
     driver = get_driver()
     async with driver.session() as session:
         await session.run(
@@ -123,6 +171,13 @@ async def delete_scope(code: str) -> None:
 
 
 async def delete_edge_types(code: str, types: list[str]) -> None:
+    """
+    Delete all edges of the given types within a lecture.
+
+    :param code: The lecture code.
+    :param types: The relationship types.
+    :return: None
+    """
     rel = "|".join(types)
     driver = get_driver()
     async with driver.session() as session:
@@ -134,6 +189,12 @@ async def delete_edge_types(code: str, types: list[str]) -> None:
 
 
 async def delete_questions(code: str) -> None:
+    """
+    Delete all Question nodes of a lecture.
+
+    :param code: The lecture code.
+    :return: None
+    """
     driver = get_driver()
     async with driver.session() as session:
         await session.run(
@@ -142,14 +203,25 @@ async def delete_questions(code: str) -> None:
         )
 
 
-# ── chapter-scoped helpers (one chapter is processed at a time) ──────────────
-
 def chapter_prefix(code: str, chapter_no: int) -> str:
+    """
+    Build the id prefix shared by all nodes of a chapter.
+
+    :param code: The lecture code.
+    :param chapter_no: The chapter number.
+    :return: The prefix <CODE>_CHNN.
+    """
     return f"{code}_CH{chapter_no:02d}"
 
 
 async def delete_chapter(code: str, chapter_no: int) -> None:
-    """Delete one chapter's subtree (Chapter/Topic/Subtopic/Concept/Question nodes)."""
+    """
+    Delete every node of a chapter with its edges.
+
+    :param code: The lecture code.
+    :param chapter_no: The chapter number.
+    :return: None
+    """
     pref = chapter_prefix(code, chapter_no)
     driver = get_driver()
     async with driver.session() as session:
@@ -159,7 +231,14 @@ async def delete_chapter(code: str, chapter_no: int) -> None:
 
 
 async def delete_edge_types_in_chapter(code: str, chapter_no: int, types: list[str]) -> None:
-    """Delete the concept edges originating from this chapter's concepts."""
+    """
+    Delete the edges of the given types that start in a chapter.
+
+    :param code: The lecture code.
+    :param chapter_no: The chapter number.
+    :param types: The relationship types.
+    :return: None
+    """
     pref = chapter_prefix(code, chapter_no)
     rel = "|".join(types)
     driver = get_driver()
@@ -171,6 +250,13 @@ async def delete_edge_types_in_chapter(code: str, chapter_no: int, types: list[s
 
 
 async def delete_questions_in_chapter(code: str, chapter_no: int) -> None:
+    """
+    Delete the Question nodes of a chapter.
+
+    :param code: The lecture code.
+    :param chapter_no: The chapter number.
+    :return: None
+    """
     pref = chapter_prefix(code, chapter_no)
     driver = get_driver()
     async with driver.session() as session:
@@ -180,9 +266,13 @@ async def delete_questions_in_chapter(code: str, chapter_no: int) -> None:
 
 
 async def delete_orphan_slides_in_chapter(code: str, chapter_no: int) -> int:
-    """Remove this chapter's content-less slides — :Slide nodes that cover no
-    concept (no outgoing COVERS edge), e.g. table-of-contents / agenda / divider
-    slides. Returns how many were deleted."""
+    """
+    Delete the chapter's Slide nodes without a COVERS edge, e.g. table of contents or agenda slides.
+
+    :param code: The lecture code.
+    :param chapter_no: The chapter number.
+    :return: The number of deleted slides.
+    """
     pref = chapter_prefix(code, chapter_no)
     driver = get_driver()
     async with driver.session() as session:
@@ -196,25 +286,31 @@ async def delete_orphan_slides_in_chapter(code: str, chapter_no: int) -> int:
 
 
 def last_change_cypher(code: str, stage: str, chapter_no: int) -> str:
-    """A scoped query returning ONLY what the given stage added for this chapter
-    (plus the endpoints of new edges), for the 'show only latest changes' view."""
+    """
+    Build the query for the "latest changes" view: what a stage added in a chapter,
+    plus the endpoints of new edges.
+
+    For the domain stage this is the chapter subtree, which includes its Slide nodes
+    and COVERS edges, since their ids share the chapter prefix.
+
+    :param code: The lecture code.
+    :param stage: The stage value, "DOMAIN", "EDGES" or "QUESTIONS".
+    :param chapter_no: The chapter number.
+    :return: The Cypher query.
+    """
     pref = chapter_prefix(code, chapter_no)
     if stage == "EDGES":
-        # the concept edges created for this chapter, with both endpoints
         return (
             f"MATCH (a)-[r:PREREQUISITE|FACILITATOR|SAME_AS]->(b) "
             f"WHERE a.id STARTS WITH '{pref}' RETURN a, r, b"
         )
     if stage == "QUESTIONS":
-        # this chapter's Question nodes and their HAS_QUESTION / TESTS edges + endpoints
         return (
             f"MATCH (q:Question) WHERE q.id STARTS WITH '{pref}' "
             f"OPTIONAL MATCH (c)-[hq:HAS_QUESTION]->(q) "
             f"OPTIONAL MATCH (q)-[t:TESTS]->(con) "
             f"RETURN q, hq, c, t, con"
         )
-    # DOMAIN (or default): the chapter subtree (now includes this chapter's Slide
-    # nodes and COVERS edges, since their ids share the chapter prefix)
     return (
         f"MATCH (n) WHERE n.id STARTS WITH '{pref}' "
         f"OPTIONAL MATCH (n)-[r]->(m) WHERE m.id STARTS WITH '{pref}' "
@@ -223,10 +319,22 @@ def last_change_cypher(code: str, stage: str, chapter_no: int) -> str:
 
 
 def _esc(v) -> str:
+    """
+    Escape a value for a single-quoted Cypher string.
+
+    :param v: The value.
+    :return: The value as string with backslashes and apostrophes escaped.
+    """
     return str(v).replace("\\", "\\\\").replace("'", "\\'")
 
 
 def _fmt(v) -> str:
+    """
+    Format a property value as Cypher literal.
+
+    :param v: The value.
+    :return: A boolean, number or quoted string literal.
+    """
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, (int, float)):
@@ -235,9 +343,16 @@ def _fmt(v) -> str:
 
 
 async def export_full_graph_cypher(code: str) -> str:
-    """Serialize the CURRENT staged graph for a lecture (nodes with all properties
-    + every relationship) to idempotent Cypher. Reflects manual edits made at the
-    validation gates, so the downloaded file matches what you see in the graph."""
+    """
+    Export the lecture's current graph with all node properties and relationships as
+    idempotent Cypher.
+
+    The export is read from Neo4j, so it contains the manual edits made at the
+    validation gates and matches what the graph view shows.
+
+    :param code: The lecture code.
+    :return: The Cypher text.
+    """
     driver = get_driver()
     lines = [
         "// Full export of the current staged graph (includes manual edits).",
@@ -275,12 +390,17 @@ _CONSTRAINT_LABELS = ["Lecture", "Chapter", "Topic", "Subtopic", "Concept", "Que
 
 
 async def export_chapter_cypher(code: str, chapter_no: int) -> str:
-    """Serialize EVERYTHING belonging to one chapter into a single, self-contained
-    idempotent .cypher file: the Lecture node, the chapter subtree (Chapter/Topic/
-    Subtopic/Concept/Question/Slide), and every relationship originating in the
-    chapter (HAS_*, PREREQUISITE/FACILITATOR/SAME_AS, TESTS, COVERS). This is the
-    consolidated 'one file per chapter' output — a merge of the per-stage files,
-    read back from Neo4j so it also reflects manual edits."""
+    """
+    Export everything belonging to one chapter as a self-contained, idempotent Cypher file.
+
+    The file contains the constraints, the Lecture node, all nodes of the chapter and
+    every relationship starting in the chapter. It replaces the per-stage files and is
+    read from Neo4j, so it contains manual edits.
+
+    :param code: The lecture code.
+    :param chapter_no: The chapter number.
+    :return: The Cypher text.
+    """
     pref = chapter_prefix(code, chapter_no)
     driver = get_driver()
     lines = [
@@ -297,7 +417,7 @@ async def export_chapter_cypher(code: str, chapter_no: int) -> str:
     lines.append("")
     async with driver.session() as session:
         lines.append("// --- Nodes ---")
-        # the Lecture node first, so the file loads stand-alone
+        # The Lecture node comes first, so the file loads on its own.
         lec = await session.run(
             "MATCH (l:Lecture {id:$code}) RETURN properties(l) AS props", code=code)
         lrec = await lec.single()
@@ -305,7 +425,6 @@ async def export_chapter_cypher(code: str, chapter_no: int) -> str:
             props = dict(lrec["props"])
             assigns = ", ".join(f"n.{k}={_fmt(v)}" for k, v in props.items())
             lines.append(f"MERGE (n:Lecture {{id:'{_esc(code)}'}})\n  SET {assigns};")
-        # the chapter subtree (all ids share the chapter prefix)
         nodes = await session.run(
             "MATCH (n) WHERE n.id STARTS WITH $pref "
             "RETURN labels(n)[0] AS label, properties(n) AS props ORDER BY n.id",
@@ -318,12 +437,11 @@ async def export_chapter_cypher(code: str, chapter_no: int) -> str:
 
         lines.append("")
         lines.append("// --- Relationships ---")
-        # the Lecture -> Chapter link (its source is the Lecture, outside the prefix)
+        # The Lecture node lies outside the chapter prefix, so HAS_CHAPTER is added explicitly.
         lines.append(
             f"MATCH (a {{id:'{_esc(code)}'}}), (b {{id:'{_esc(pref)}'}}) "
             "MERGE (a)-[:HAS_CHAPTER]->(b);")
-        # every relationship that originates in this chapter (intra-chapter edges and
-        # any outgoing cross-chapter edge; the other endpoint is matched if present)
+        # Includes edges into other chapters; they are created if the target exists.
         rels = await session.run(
             "MATCH (a)-[r]->(b) WHERE a.id STARTS WITH $pref "
             "RETURN a.id AS s, type(r) AS t, b.id AS o ORDER BY s, t, o",
@@ -337,9 +455,15 @@ async def export_chapter_cypher(code: str, chapter_no: int) -> str:
 
 
 async def export_slides_cypher(code: str) -> str:
-    """Dump the :Slide nodes already staged for a lecture (all properties) plus
-    their COVERS edges, so the slides stage of a LATER chapter sees what already
-    exists and reuses ids instead of creating duplicate slide nodes."""
+    """
+    Export the lecture's existing Slide nodes and their COVERS edges.
+
+    The domain stage of a later chapter reads this file to reuse slide ids instead
+    of creating duplicates.
+
+    :param code: The lecture code.
+    :return: The Cypher text.
+    """
     driver = get_driver()
     lines = [
         "// Existing :Slide nodes already in the graph.",
@@ -369,9 +493,15 @@ async def export_slides_cypher(code: str) -> str:
 
 
 async def export_domain_cypher(code: str) -> str:
-    """Dump the staged nodes for a lecture as `MERGE (n:Label {id:'...'})` lines,
-    so the stage-2/3 verifier scripts (which glob `.cypher` files) and the agent
-    see the current, possibly hand-edited, domain."""
+    """
+    Export the ids and labels of the lecture's nodes as MERGE lines.
+
+    The agent and the verification scripts of stages 2 and 3 read this file to
+    see the current, possibly manually edited, domain model.
+
+    :param code: The lecture code.
+    :return: The Cypher text.
+    """
     driver = get_driver()
     lines = ["// Exported staged domain for verification."]
     async with driver.session() as session:

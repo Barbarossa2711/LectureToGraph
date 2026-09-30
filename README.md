@@ -1,307 +1,491 @@
 # LectureToGraph
 
-**KI-gestützte Pipeline, die aus Vorlesungs-PDFs ein Wissensgraph-Domainmodell in
-Neo4j erzeugt.** Ein provider-unabhängiger Agent (Anthropic *oder* OpenAI) liest die
-Folien, baut Schritt für Schritt einen Cypher-Wissensgraphen auf und lässt dich
-zwischen jedem Schritt das Ergebnis visuell prüfen, manuell bearbeiten und freigeben.
-Verarbeitet wird **kapitelweise** — sowohl ein großes Gesamt-Dokument als auch
-einzelne Kapitel-PDFs.
+**AI-assisted construction of a lecture's domain model, from slide PDFs to a Neo4j
+knowledge graph.** An LLM agent reads the lecture slides and builds the graph chapter
+by chapter in three stages. After every stage the lecturer reviews the result,
+edits it and approves it before the tool continues.
 
-Der Graph dient als Domain-Model für ein späteres adaptives Lernsystem.
+LectureToGraph was developed as part of the master's thesis *Lernfortschrittsmodellierung
+und adaptive Empfehlungen in einem KI-basierten Multi-Agenten-Tutoring-System*
+(Hochschule Niederrhein, 2026). It produces the domain model that the tutoring system
+GRAPHIT uses for learner modelling and learning path recommendations. The tool runs
+upstream of that system and does not touch any other part of the graph.
 
----
-
-## Inhaltsverzeichnis
-
-- [Funktionsumfang](#funktionsumfang)
-- [Schnellstart (Docker Compose)](#schnellstart-docker-compose)
-- [Ablauf / Bedienung](#ablauf--bedienung)
-- [Graph-Schema](#graph-schema)
-- [Architektur](#architektur)
-- [Visualisierung](#visualisierung)
-- [Export & Neo4j-Upload](#export--neo4j-upload)
-- [Konfiguration](#konfiguration)
-- [API-Überblick](#api-überblick)
-- [Projektstruktur](#projektstruktur)
-- [Tech-Stack](#tech-stack)
+Building such a domain model by hand is not practical: a lecture like *Big-Data-Technologien*
+has seven chapters and several hundred concepts, and deciding whether and how two concepts
+depend on each other requires domain expertise. LectureToGraph therefore does not aim at
+full automation. It follows the principle of **AI-assisted construction under expert
+supervision**: the model proposes, the lecturer decides.
 
 ---
 
-## Funktionsumfang
+## Contents
 
-- **Provider-unabhängig** – Anthropic (Claude) oder OpenAI (GPT). Das Modell-Dropdown
-  wird **live** aus den mit dem API-Key tatsächlich verfügbaren Modellen befüllt.
-- **PDF-Vision** – die Folien werden als Text *und* gerenderte Seitenbilder gelesen
-  (PyMuPDF + pdfplumber), seitenweise in Batches.
-- **3-stufige Pipeline pro Kapitel** – Domainmodell → Konzept-Kanten →
-  Wiederholungsfragen, jeweils mit Validierungs-Gate.
-- **Kapitel-inkrementell** – ein Gesamt-PDF wird kapitelweise iteriert (die KI erkennt
-  die Kapitel und lässt sie bestätigen); bei einzelnen Kapitel-PDFs kann am Ende ein
-  weiteres Kapitel hinzugefügt werden.
-- **Live-Validierung** – nach jedem Schritt wird der Graph in einem Neo4j-Browser-Look
-  (neovis.js) angezeigt. Knoten/Kanten lassen sich manuell hinzufügen, per Rechtsklick
-  ansehen/bearbeiten/löschen.
-- **Cypher als Quelle der Wahrheit** – jeder Schritt erzeugt `.cypher`-Dateien;
-  manuelle Änderungen lassen sich jederzeit in eine Cypher-Datei speichern.
-- **Neo4j-Upload** – in die mitgelieferte Docker-Neo4j (neu) laden oder in eine
-  **eigene** Neo4j (Desktop / eigener Docker) per Zugangsdaten-Formular hochladen.
-- **Deutsch/English** – die KI-Rückfragen sind standardmäßig auf Deutsch, umschaltbar.
-- **Resumierbar** – Jobs laufen asynchron, der Fortschritt kommt per SSE live an;
-  ein Reconnect rehydriert den Zustand.
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Workflow](#workflow)
+- [Graph schema](#graph-schema)
+- [How it works](#how-it-works)
+- [Architecture](#architecture)
+- [Visualisation and editing](#visualisation-and-editing)
+- [Export and Neo4j upload](#export-and-neo4j-upload)
+- [Configuration](#configuration)
+- [API overview](#api-overview)
+- [Runtime and cost](#runtime-and-cost)
+- [Limitations](#limitations)
+- [Project structure](#project-structure)
+- [Tech stack](#tech-stack)
 
 ---
 
-## Schnellstart (Docker Compose)
+## Features
 
-### 1 · API-Key(s) hinterlegen
+- **Provider-agnostic.** Works with Anthropic (Claude), OpenAI and any OpenAI-compatible
+  endpoint such as the university cluster. The model dropdown is filled live with the
+  models that are actually available for the configured key or endpoint.
+- **Multimodal PDF reading.** Slides are passed to the model as extracted text
+  (pdfplumber) *and* as rendered page images (PyMuPDF), in batches of fixed size.
+  Outline levels, highlights and figures cannot be recovered reliably from text alone.
+- **Three stages per chapter:** lecture structure (with slides), concept edges and
+  review questions.
+- **Chapter by chapter.** Works with one comprehensive PDF (the agent proposes the chapter
+  breakdown and asks for confirmation) or with one PDF per chapter. Approved chapters stay
+  untouched when another chapter is added.
+- **Validation gates.** After each stage the graph is shown in a Neo4j-Browser-like view.
+  Nodes and edges can be added, edited or deleted before the stage is approved, or the
+  stage can be re-run with textual feedback.
+- **Formal properties are enforced by scripts, not by the model.** Verification scripts
+  check that edges reference existing concepts and that the dependency graph is acyclic;
+  a stage cannot finish until they pass.
+- **Cypher is the source of truth.** Every stage writes idempotent `.cypher` files (`MERGE`
+  only). Manual edits can be written back to a Cypher file at any time.
+- **Neo4j upload.** Load the graph into the bundled Neo4j or into your own instance
+  (Neo4j Desktop, your own Docker) with a credentials form.
+- **German or English.** The agent asks its questions in German by default; switchable.
+- **Resumable.** Jobs run asynchronously; progress arrives via server-sent events and a
+  reconnecting browser restores the current state.
 
-Im Projekt-Root eine `.env` anlegen (ist über `.gitignore` ausgeschlossen):
+---
+
+## Quick start
+
+Requirements: Docker with Docker Compose.
+
+### 1 · Configure providers
+
+Create a `.env` in the project root (it is git-ignored). Set at least one provider:
 
 ```dotenv
-# mindestens einen der beiden Keys setzen
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
+
+# Optional: private OpenAI-compatible endpoint (e.g. an OpenWebUI gateway).
+# Leave CLUSTER_BASE_URL empty to hide this provider.
+CLUSTER_BASE_URL=https://<host>:<port>/api/v1
+CLUSTER_API_KEY=...
+CLUSTER_MODEL=ultrabrain
+# For a self-signed certificate: put the .pem into ./certs (see certs/README.md)
+CLUSTER_CA_BUNDLE=/certs/cluster_ca.pem
 ```
 
-### 2 · Stack starten
+### 2 · Start the stack
 
 ```bash
 docker compose up --build
 ```
 
-| Dienst | URL | Login |
+| Service | URL | Login |
 |---|---|---|
-| **App (Frontend)** | http://localhost:5173 | – |
-| Backend-API / Docs | http://localhost:8000/docs | – |
+| **App (frontend)** | http://localhost:5173 | – |
+| Backend API / OpenAPI docs | http://localhost:8000/docs | – |
 | Neo4j Browser | http://localhost:7474 | `neo4j` / `password` |
 | Neo4j Bolt | `bolt://localhost:7687` | `neo4j` / `password` |
 
-Die mitgelieferte Neo4j-Datenbank ist die Staging-DB, die auch die Visualisierung
-speist. Die Daten liegen im Docker-Volume `neo4j_data` und überleben Neustarts
-(`docker compose down -v` löscht das Volume).
+The bundled Neo4j is the staging database that also feeds the visualisation. Its data
+lives in the Docker volume `neo4j_data` and survives restarts; `docker compose down -v`
+deletes it.
 
-> **Test-PDF:** `Beispiel-Vorlesung.pdf` (eine kurze 2-seitige Beispiel-Vorlesung
-> „Einführung in Datenbanksysteme") liegt im Root und kann direkt hochgeladen werden.
-
----
-
-## Ablauf / Bedienung
-
-1. **Job anlegen** – Anbieter, Modell und Sprache wählen, ein oder mehrere
-   Vorlesungs-PDF(s) hochladen, „KI-Modus starten".
-2. **Kapitel 1 · Domainmodell** – die KI liest die Folien. Bei einem Gesamt-PDF
-   schlägt sie die Kapitelstruktur vor und fragt nach Bestätigung; sie verarbeitet
-   genau **ein** Kapitel und schreibt das `.cypher`. Eventuelle Rückfragen erscheinen
-   rechts.
-3. **Validieren** – der Graph wird angezeigt. Du kannst Knoten/Kanten manuell
-   anpassen und dann **freigeben** oder den Schritt mit Feedback **neu generieren**.
-4. **Konzept-Kanten** – `PREREQUISITE` / `FACILITATOR` / `SAME_AS` für die Konzepte
-   des Kapitels (mit Verifikations-Gate). → validieren.
-5. **Wiederholungsfragen** – `Question`-Knoten + `HAS_QUESTION`/`TESTS`. → validieren.
-6. **Kapitel fertig** – „**+ Weiteres Kapitel hinzufügen**" (optional neues PDF
-   hochladen, sonst nimmt die KI das nächste Kapitel aus dem Gesamt-Dokument) oder
-   „**Vorlesung abschließen**".
-
-Reruns sind kapitel-gescopt: ein Neu-Generieren von Kapitel 2 betrifft nur Kapitel 2.
+> **Test PDF:** `Beispiel-Vorlesung.pdf` in the project root is a short two-page sample
+> lecture (*Einführung in Datenbanksysteme*) that can be uploaded right away.
 
 ---
 
-## Graph-Schema
-
-Standardisiert auf das Skill-Schema (vgl. `backend/app/models/domain.py`).
-
-### Knoten
-
-| Label | wichtige Properties |
-|---|---|
-| `Lecture` | `id` (= `code`), `name`, `degreeType`, `term`, `PO`, `prof` |
-| `Chapter` | `id`, `name`, `index` |
-| `Topic` | `id`, `name`, `index` |
-| `Subtopic` | `id`, `name`, `index` |
-| `Concept` | `id`, `name`, `index` |
-| `Question` | `id`, `text`, `index`, `chapter`, `pageNumber`, `source`, `note?` |
-
-### Kanten
-
-| Beziehung | Richtung | Bedeutung |
-|---|---|---|
-| `HAS_CHAPTER` | Lecture → Chapter | strukturelle Hierarchie |
-| `HAS_TOPIC` | Chapter → Topic | strukturelle Hierarchie |
-| `HAS_SUBTOPIC` | Topic → Subtopic | strukturelle Hierarchie |
-| `HAS_CONCEPT` | Topic/Subtopic → Concept | strukturelle Hierarchie |
-| `PREREQUISITE` | Concept → Concept | setzt voraus |
-| `FACILITATOR` | Concept → Concept | erleichtert |
-| `SAME_AS` | Concept → Concept | inhaltlich gleich (Deduplizierung) |
-| `HAS_QUESTION` | Chapter → Question | Frage gehört zum Kapitel |
-| `TESTS` | Question → Concept | Frage testet dieses Konzept |
-
-### ID-Schema (Scoping-Schlüssel)
+## Workflow
 
 ```
-BDT                          Lecture (code)
+            re-run with textual feedback
+        ┌───────────────┬────────────────┬──────────────────┐
+        ▼               │                │                  │
+ Stage 1 ──▶ Gate ──▶ Stage 2 ──▶ Gate ──▶ Stage 3 ──▶ Gate ──▶ next chapter / finish
+ structure            concept            review
+ + slides             edges              questions
+              (verification script of the stage runs before every gate)
+```
+
+1. **Create a job.** Choose provider, model and language, upload the lecture PDF(s) and
+   start.
+2. **Stage 1 · Lecture structure.** The agent reads the slides. For a comprehensive PDF it
+   proposes the chapter breakdown with page ranges and asks for confirmation. It builds
+   exactly one chapter: the hierarchy of topics, subtopics and concepts, and a `Slide` node
+   per slide that presents at least one concept, linked via `COVERS`. While the deck is
+   open it also captures the chapter's review questions verbatim for stage 3.
+3. **Validate.** Check the graph, edit it if needed, then approve or re-run.
+4. **Stage 2 · Concept edges.** `PREREQUISITE`, `FACILITATOR` and `SAME_AS` between the
+   chapter's concepts. Validate.
+5. **Stage 3 · Review questions.** `Question` nodes with `HAS_QUESTION` and `TESTS`.
+   Validate.
+6. **Chapter done.** Add another chapter (optionally upload a new chapter PDF; otherwise the
+   agent continues with the next chapter of the comprehensive PDF) or finish the lecture.
+
+Whenever a modelling decision is ambiguous, for example the granularity of concepts or
+missing lecture metadata, the agent pauses and asks. The question appears on the right;
+the pipeline continues once it is answered.
+
+A re-run is limited to the current stage of the current chapter: the tool deletes what this
+stage created in the chapter and starts the agent with a fresh conversation, with the
+feedback as additional instruction. Approved chapters and earlier stages are not affected.
+
+---
+
+## Graph schema
+
+The domain model is a labeled property graph. The lecture structure forms a hierarchy;
+typed edges between concepts express their didactic order.
+
+### Nodes
+
+| Label | Properties | Meaning |
+|---|---|---|
+| `Lecture` | `id` (= `code`), `name`, `code`, `degreeType`, `PO`, `ECTS`, `prof`, `term` | Root of a course. `code` is the official abbreviation (e.g. `BDT`), `degreeType` Bachelor or Master, `PO` the examination regulations, `ECTS` the credit points of the module (used by the learner model), `term` the semester. |
+| `Chapter` | `id`, `index`, `name` | One lecture unit, in table-of-contents order. |
+| `Topic` | `id`, `index`, `name` | A topic within a chapter. |
+| `Subtopic` | `id`, `name` | Optional grouping below a topic; may nest recursively. |
+| `Concept` | `id`, `name` | Finest granularity: a concept or fact students should learn. Concepts carry **no** `index`; their order is defined only by the concept edges. |
+| `Slide` | `id`, `title`, `pageNr`, `source`, `lecture`, `chapter`, `chapterIndex`, `chapterName` | A slide that presents at least one concept. `source` is the PDF file name. Used for retrieval of the slide content. |
+| `Question` | `id`, `text`, `index`, `chapter`, `pageNr`, `source`, `note` (optional) | A review question of the lecture, verbatim, with its position in the slides. |
+
+### Edges
+
+| Edge | Direction | Meaning |
+|---|---|---|
+| `HAS_CHAPTER` | Lecture → Chapter | hierarchy |
+| `HAS_TOPIC` | Chapter → Topic | hierarchy |
+| `HAS_SUBTOPIC` | Topic/Subtopic → Subtopic | hierarchy |
+| `HAS_CONCEPT` | Topic/Subtopic → Concept | hierarchy |
+| `HAS_QUESTION` | Chapter → Question | the question belongs to this chapter |
+| `TESTS` | Question → Concept | the question tests this concept |
+| `COVERS` | Slide → Concept | the slide presents this concept |
+| `PREREQUISITE` | Concept → Concept | **A requires B** (necessity) |
+| `FACILITATOR` | Concept → Concept | **B helps with A** but is not required (usefulness) |
+| `SAME_AS` | Concept → Concept | the same concept reappearing in another chapter |
+
+### Concept dependencies
+
+The concept edges distinguish two readings of "A comes after B":
+
+- **`PREREQUISITE`** encodes necessity and acts as a hard condition: the tutoring system
+  does not recommend A before B is mastered. Several incoming `PREREQUISITE` edges are
+  evaluated conjunctively. The relation is asymmetric, irreflexive and transitive, so the
+  subgraph is acyclic. Only **direct** prerequisites are stored; indirect ones follow from
+  graph traversal (minimal educational knowledge graph).
+- **`FACILITATOR`** encodes usefulness and acts as a soft preference that only affects the
+  ranking of recommendations. It is kept acyclic but not transitively closed, since
+  usefulness does not chain.
+- A third reading, pure convention ("usually taught first"), is deliberately not modelled:
+  the presentation order is already given by the chapter hierarchy and `index`.
+
+Edges point from the dependent concept to the more fundamental one. The combined
+`PREREQUISITE` + `FACILITATOR` graph must be acyclic as well, and no pair of concepts may
+carry two edge types at once. Edges between chapters are allowed but always point from the
+later to the earlier chapter, which respects the learning order and rules out cycles across
+chapters.
+
+### ID scheme
+
+IDs are hierarchical and start with the lecture code, so every operation can be scoped to
+one lecture (`n.id STARTS WITH '<code>'`) or one chapter (`'<code>_CHnn'`):
+
+```
+BDT                          Lecture
 BDT_CH01                     Chapter
-BDT_CH01_T01                 Topic
-BDT_CH01_T01_S01             Subtopic
-BDT_CH01_T01_C01             Concept
-BDT_CH01_Q01                 Question
+BDT_CH01_T03                 Topic
+BDT_CH01_T01_S02             Subtopic
+BDT_CH01_T01_S02_C01         Concept
+BDT_CH06_SL34                Slide    (<CODE>_CHnn_SL<pageNr>)
+BDT_CH01_Q12                 Question
 ```
 
-Alles wird über das `code`-Präfix einer Vorlesung gescopt (`n.id STARTS WITH <code>`).
-Alle Statements nutzen `MERGE` → idempotent und neu-ladbar.
-
 ---
 
-## Architektur
+## How it works
 
-```
-PDF(s) ──▶ Agent-Loop ──▶ .cypher ──▶ Neo4j (Staging) ──▶ neovis.js (Visualisierung)
-            │  (provider-agnostisch)            ▲                    │
-            │  Tools: read_pdf, read_file,      │ manuelle Edits     │
-            │  write_file, list_dir,            └────────────────────┘
-            │  run_script, ask_user, stage_complete
-            ▼
-       Skills (SKILL.md + Scripts) pro Stage
-```
+### Agent and providers
 
-### Backend (FastAPI, async)
+An LLM gets access to the lecture material through a small set of tools and runs in a loop
+until it asks the user a question or completes the stage. Internally the conversation uses
+one message format (typed text, image, tool-use and tool-result blocks); adapters map it to
+the Anthropic Messages API and to OpenAI-compatible chat completions, including their
+differences in tool calls and images in tool results.
 
-- **Provider-agnostischer Agent-Loop** (`app/ai/`) mit einem normalisierten,
-  Anthropic-förmigen Nachrichtenformat (Text/Image/ToolUse/ToolResult). Adapter
-  übersetzen zu/von Anthropic und OpenAI (inkl. der Unterschiede bei Tool-Calls und
-  Bildern in Tool-Results).
-- **Tools** (`app/ai/tools.py`, `tool_exec.py`) – sandboxed auf den Job-Workspace,
-  `run_script` nur für die je Stage erlaubten Skill-Scripts.
-- **PDF** (`app/ai/pdf.py`) – PyMuPDF rendert Seiten, pdfplumber extrahiert Text;
-  als multimodale Blöcke, seitenweise gebatcht.
-- **Pipeline** (`app/pipeline/`) – `runner.py` steuert die Stages/Kapitel,
-  `stages.py` enthält die kapitel-bewussten Kickoff-Prompts, `cypher_loader.py` lädt
-  Cypher atomar und scope-gebunden in Neo4j.
-- **Skills** (`app/skills/`) – drei vendored Claude-Skills (`lecture-domain-model`,
-  `lecture-concept-edges`, `lecture-review-questions`) inkl. ihrer Verify-Scripts;
-  `registry.py` baut den System-Prompt = `SKILL.md` + Umgebungs-Addendum + Sprache.
-- **Jobs** (`app/jobs/`) – In-Memory-Store, per-Job Pub/Sub für SSE, Workspace-Handling.
+### Skills
 
-### Frontend (React + Vite + TypeScript)
+The domain-specific rules of each stage are not in the program code. They live in
+declarative **skill definitions** modelled after Anthropic's Agent Skills: a `SKILL.md` with
+a front matter naming and describing the skill, instructions in natural language, and
+optionally scripts, reference documents and examples.
 
-- `pipelineStore` (zustand) hält Job, Log und Viz-State; SSE-Anbindung über `EventSource`.
-- `GraphView` mountet **neovis.js** direkt per Bolt an die App-Neo4j.
-- Validierungs-Panel mit manueller Bearbeitung, Rechtsklick-Knoten-Popup,
-  Kapitel-Loop-Panel, Export- und Neo4j-Upload-Optionen.
-
----
-
-## Visualisierung
-
-- **Farben** je Knoten- und Kantentyp; Beschriftungen dunkel und gut lesbar.
-- **Knotengröße** nimmt mit der Hierarchie-Ebene ab (Lecture am größten, Question am
-  kleinsten).
-- **Rechtsklick auf einen Knoten** öffnet ein Popup mit allen Attributen → direkt
-  editieren oder löschen (kein ID-Raten nötig).
-- **„Nur Struktur"** (Schalter unten links) blendet die semantischen Kanten
-  (`PREREQUISITE`/`FACILITATOR`/`SAME_AS`/`TESTS`) aus; diese beeinflussen ohnehin das
-  Kräfte-Layout nicht (`physics: false`), damit die Hierarchie übersichtlich bleibt.
-- **„Nur letzte Änderungen"** zeigt ausschließlich das, was der zuletzt gelaufene
-  Schritt für das aktuelle Kapitel erzeugt hat (inkl. der Endknoten neuer Kanten).
-
----
-
-## Export & Neo4j-Upload
-
-- **Cypher-Export** – pro Schritt erzeugte `.cypher`-Dateien als Download.
-- **„Manuelle Änderungen in Cypher speichern"** – serialisiert den **kompletten
-  aktuellen Graphen** (inkl. manueller Edits) idempotent als `<code>_full.cypher`.
-- **Mitgelieferte Neo4j (Docker)** – Zugangsdaten + Beispiel-Query werden angezeigt;
-  „erneut laden" stellt sicher, dass die DB dem exportierten Cypher entspricht.
-- **Eigene Neo4j (Desktop / eigener Docker)** – URI/Benutzer/Passwort eintragen und
-  direkt hochladen. `localhost`/`127.0.0.1` wird automatisch auf `host.docker.internal`
-  umgeschrieben, damit der Container den Host erreicht.
-
----
-
-## Konfiguration
-
-Alle Einstellungen via Environment (pydantic-settings, siehe `backend/app/config.py`).
-Die wichtigsten Variablen (Defaults in Klammern):
-
-| Variable | Default | Zweck |
+| Stage | Skill | Verification script |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | – | Anthropic-Zugang |
-| `OPENAI_API_KEY` | – | OpenAI-Zugang |
-| `ANTHROPIC_MODEL` | `claude-opus-4-8` | Standard-Claude-Modell |
-| `OPENAI_MODEL` | `gpt-5.4` | Standard-OpenAI-Modell |
-| `NEO4J_URI` | `bolt://neo4j:7687` | Staging-DB (im Compose-Netz) |
-| `NEO4J_BROWSER_URI` | `bolt://localhost:7687` | Bolt-URL für den Browser/neovis |
-| `WORKSPACE_DIR` | `/work` (Compose) | Job-Workspace |
-| `PDF_RENDER_DPI` | `110` | Render-Auflösung |
-| `PDF_MAX_PAGES_PER_BATCH` | `5` | Seiten pro `read_pdf`-Aufruf |
-| `AGENT_MAX_TURNS` | `60` | Sicherheitslimit pro Stage |
-| `AGENT_MAX_TOKENS` | `8192` | Output-Tokens pro Modellaufruf |
+| 1 · Structure + slides | `lecture-domain-model` | `json_to_cypher.py` (generates the Cypher), `verify_slides.py` |
+| 2 · Concept edges | `lecture-concept-edges` | `verify_edges.py` |
+| 3 · Review questions | `lecture-review-questions` | `verify_questions.py` |
 
-> Neo4j 5 Community hat kein RBAC – der Browser/neovis nutzt daher die Standard-
-> Zugangsdaten (`neo4j`/`password`). Für ein lokales Einzelplatz-Tool ist das in Ordnung.
+At run time the skill of the current stage becomes the agent's system prompt. Unlike with
+Anthropic's skills, the agent does not choose the skill itself; the running stage decides.
+An addendum maps the tools the skill mentions onto the tools of LectureToGraph. This makes it
+possible to change the didactic modelling decisions without touching the implementation.
+
+### Tools and sandbox
+
+| Tool | Purpose |
+|---|---|
+| `read_pdf(path, pages?)` | text and rendered page images of an uploaded PDF, a few pages per call |
+| `read_file`, `write_file`, `list_dir` | text files in the job workspace |
+| `run_script(script, args)` | run a verification or generation script of the current stage |
+| `ask_user(questions)` | pause and ask the lecturer |
+| `stage_complete(summary, artifacts)` | finish the stage and hand over to the validation gate |
+
+All file access is resolved against a workspace created per job and rejected if the path
+leaves it. `run_script` only runs the scripts whitelisted for the current stage.
+
+### Verification
+
+The formal properties of the graph are enforced by scripts. The agent may call
+`stage_complete` only once the script of its stage passes:
+
+- `verify_slides.py`: unique slide ids, every `COVERS` target is a defined concept, every
+  slide has all required properties, and every concept of the chapter is covered by at
+  least one slide.
+- `verify_edges.py`: every endpoint is a defined concept, no duplicates or self-loops, the
+  `PREREQUISITE` graph is acyclic, the combined `PREREQUISITE` + `FACILITATOR` graph is
+  acyclic, and no pair is both `PREREQUISITE` and `SAME_AS`, or `FACILITATOR` and another
+  type. Cross-chapter edges must point from a later to an earlier chapter, never forward;
+  their number is reported for review.
+- `verify_questions.py`: unique question ids, every `TESTS` target is a defined concept,
+  and every chapter with questions has its `HAS_QUESTION` edges.
+
+After stage 1, slides without a `COVERS` edge (table of contents, agenda, dividers) are
+removed automatically.
 
 ---
 
-## API-Überblick
+## Architecture
 
-Alle Routen unter `/api`. Auswahl der Job-/Pipeline-Endpoints:
+LectureToGraph consists of three components, deployed with Docker Compose:
 
-| Methode | Pfad | Zweck |
+```
+ Lecturer ──▶ Frontend (React, TypeScript)
+               job setup · questions · validation gates · graph view (neovis.js)
+                   │ REST                ▲ server-sent events        │ Bolt (display)
+                   ▼                     │                           ▼
+               Backend (FastAPI, async) ─┘                     Neo4j (staging)
+               ├─ pipeline runner   stages and chapters              ▲
+               ├─ agent loop ──▶ provider adapters ──▶ Anthropic / OpenAI / cluster
+               │     └─ tools ──▶ job workspace (PDFs, .cypher files)
+               ├─ skills        SKILL.md + scripts per stage
+               └─ Cypher loader ─────────────────────────────────────┘
+                     └─ upload ──▶ production Neo4j
+```
+
+- **Frontend** – lets the lecturer provide the lecture material, answer the agent's
+  questions and review and approve each stage.
+- **Backend** – runs the agent with its tools and loads the generated Cypher into the
+  staging database. Processing a chapter takes several minutes and waits for the lecturer at
+  every gate, so it runs asynchronously; a job survives a lost browser connection.
+- **Neo4j** – the staging database holds the graph until it is exported or uploaded.
+
+Backend modules (`backend/app/`):
+
+- `ai/` – agent loop, provider adapters, tool schemas and execution, PDF reading.
+- `pipeline/` – `runner.py` drives stages and chapters, `stages.py` holds the
+  chapter-aware kickoff prompts, `cypher_loader.py` loads Cypher and provides the
+  lecture- and chapter-scoped delete and export functions.
+- `skills/` – the three skills and `registry.py`, which builds the system prompt
+  (`SKILL.md` + environment addendum + language directive).
+- `jobs/` – in-memory job store, per-job event bus for SSE, workspace handling.
+- `api/routes/` – REST endpoints.
+
+---
+
+## Visualisation and editing
+
+- Colours per node and edge type; `PREREQUISITE` is red, `FACILITATOR` yellow,
+  review questions purple with dashed `TESTS` edges.
+- **Right-click a node** to see all its properties and edit or delete it.
+- The editor panel at the gate adds, changes or deletes nodes and edges by id.
+- **Filter** menu: hide individual node types, edge types or chapters; "structure only"
+  hides all semantic edges. Semantic edges never take part in the physics simulation, so
+  they do not distort the tree layout.
+- **Only latest changes** shows just what the last stage created in the current chapter,
+  including the endpoints of new edges.
+- **Hierarchical layout** arranges the nodes as a tree by level.
+
+---
+
+## Export and Neo4j upload
+
+- **Per-chapter Cypher.** When a chapter is finished, its stage files are consolidated into
+  one self-contained `<CODE>_CHnn.cypher` (constraints, lecture node, all chapter nodes and
+  edges), read back from Neo4j so it includes manual edits.
+- **Save manual changes to Cypher** writes the complete current graph as
+  `<CODE>_full.cypher`; **Current graph** downloads it directly.
+- **Bundled Neo4j** – shows the connection data and a sample query; "load again" makes sure
+  the database matches the exported Cypher.
+- **Own Neo4j** – enter URI, user, password and optionally the database to upload the
+  graph. `localhost` / `127.0.0.1` is rewritten to `host.docker.internal` so the container
+  reaches your host. Note that port `7687` is already taken by the bundled database.
+
+All statements use `MERGE`, so loading a file twice yields the same graph.
+
+---
+
+## Configuration
+
+All settings come from environment variables (pydantic-settings, see
+`backend/app/config.py`). Docker Compose passes the provider variables from `.env`.
+
+| Variable | Default | Purpose |
 |---|---|---|
-| `GET` | `/config/providers` | verfügbare Anbieter + (live) Modelle |
-| `POST` | `/jobs` | Job anlegen (`provider`, `model`, `language`) |
-| `POST` | `/jobs/{id}/pdfs` | PDF(s) hochladen |
-| `POST` | `/jobs/{id}/start` | Pipeline starten |
-| `GET` | `/jobs/{id}/events` | SSE-Stream (Status/Log/Frage/Gate/Fehler) |
-| `POST` | `/jobs/{id}/answer` | `ask_user` beantworten (Resume) |
-| `POST` | `/jobs/{id}/gate/approve` | Schritt freigeben |
-| `POST` | `/jobs/{id}/stage/rerun` | Schritt neu generieren (mit Feedback) |
-| `POST` | `/jobs/{id}/add-chapter` | weiteres Kapitel hinzufügen |
-| `POST` | `/jobs/{id}/finish` | Vorlesung abschließen |
-| `POST` | `/jobs/{id}/language` | Sprache umschalten (`de`/`en`) |
-| `GET` | `/jobs/{id}/viz-config` | neovis-Konfiguration (inkl. „letzte Änderungen") |
-| `GET` | `/jobs/{id}/full-cypher` | kompletten Graphen als Cypher herunterladen |
-| `POST` | `/jobs/{id}/save-cypher` | aktuellen Graphen als Artefakt speichern |
-| `POST` | `/jobs/{id}/load-bundled` | in die mitgelieferte Neo4j (neu) laden |
-| `POST` | `/jobs/{id}/upload-neo4j` | in eine externe Neo4j hochladen |
-| `GET`/`POST`/`PUT`/`DELETE` | `/nodes`, `/edges` | manuelle Graph-Bearbeitung |
+| `ANTHROPIC_API_KEY` | – | Anthropic access |
+| `ANTHROPIC_MODEL` / `ANTHROPIC_MODEL_FAST` | `claude-opus-4-8` / `claude-sonnet-4-6` | preselected model / fallback entries if the model list cannot be fetched |
+| `OPENAI_API_KEY` | – | OpenAI access |
+| `OPENAI_MODEL` / `OPENAI_MODEL_FAST` | `gpt-5.4` / `gpt-5.4-mini` | as above |
+| `CLUSTER_BASE_URL` | – | OpenAI-compatible endpoint; empty hides the provider. For OpenWebUI it must end in `/api/v1`. |
+| `CLUSTER_API_KEY` | – | key for the endpoint |
+| `CLUSTER_LABEL` | `Hochschul-Cluster` | name shown in the UI |
+| `CLUSTER_MODEL` / `CLUSTER_MODEL_FAST` | `ultrabrain` / – | preselected model / fallback entries |
+| `CLUSTER_CA_BUNDLE` | – | server certificate for a self-signed endpoint (path inside the container, e.g. `/certs/cluster_ca.pem`) |
+| `CLUSTER_VERIFY_SSL` | `true` | last resort: disable certificate checks |
+| `NEO4J_URI` | `bolt://neo4j:7687` (Compose) | staging database for the backend |
+| `NEO4J_BROWSER_URI` | `bolt://localhost:7687` | Bolt URL used by the browser (neovis.js) |
+| `WORKSPACE_DIR` | `/work` (Compose) | job workspaces |
+| `PDF_RENDER_DPI` | `110` | render resolution |
+| `PDF_MAX_PAGES_PER_BATCH` | `5` | pages per `read_pdf` call |
+| `PDF_IMAGE_MAX_EDGE` | `1568` | longest image edge in pixels |
+| `AGENT_MAX_TURNS` | `60` | safety limit of model calls per stage |
+| `AGENT_MAX_TOKENS` | `8192` | output tokens per model call |
+
+For the cluster, the model list is fetched live from `GET <CLUSTER_BASE_URL>/models`, so
+every model the endpoint offers appears in the dropdown.
+
+> Neo4j 5 Community has no role-based access control, so the browser uses the standard
+> credentials (`neo4j` / `password`). This is fine for a local single-user tool.
 
 ---
 
-## Projektstruktur
+## API overview
+
+All routes are under `/api`; the interactive documentation is at
+http://localhost:8000/docs.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/config/providers` | providers with availability and live model list |
+| `POST` | `/jobs` | create a job (`provider`, `model`, `language`) |
+| `POST` | `/jobs/{id}/pdfs` | upload PDFs |
+| `POST` | `/jobs/{id}/start` | start the pipeline |
+| `GET` | `/jobs/{id}` | job state |
+| `GET` | `/jobs/{id}/events` | SSE stream (status, log, tool, question, gate, error) |
+| `POST` | `/jobs/{id}/answer` | answer `ask_user` and resume |
+| `POST` | `/jobs/{id}/gate/approve` | approve the stage |
+| `POST` | `/jobs/{id}/stage/rerun` | re-run the stage with optional feedback |
+| `POST` | `/jobs/{id}/add-chapter` | continue with the next chapter |
+| `POST` | `/jobs/{id}/finish` | finish the lecture |
+| `POST` | `/jobs/{id}/language` | switch language (`de` / `en`) |
+| `GET` | `/jobs/{id}/viz-config` | neovis.js configuration incl. "latest changes" query |
+| `GET` | `/jobs/{id}/artifact?path=` | download a workspace file |
+| `GET` | `/jobs/{id}/full-cypher` | download the complete graph as Cypher |
+| `POST` | `/jobs/{id}/save-cypher` | save the complete graph as workspace file |
+| `GET` | `/jobs/{id}/bundled-access` | connection data of the bundled Neo4j |
+| `POST` | `/jobs/{id}/load-bundled` | load the graph into the bundled Neo4j again |
+| `POST` | `/jobs/{id}/upload-neo4j` | upload the graph into an external Neo4j |
+| `GET` | `/lectures`, `/lectures/{code}/graph` | list lectures, lecture subgraph |
+| `DELETE` | `/lectures/{code}` | delete a lecture |
+| `POST` / `PUT` / `DELETE` | `/nodes`, `/nodes/{id}`, `/edges` | manual graph editing |
+
+---
+
+## Runtime and cost
+
+Measured in the thesis (section 4.2.5) on chapter 6 of *Big-Data-Technologien* over all three
+stages, with a script answering every question immediately and approving every stage without
+re-runs:
+
+| Model | Slides | Duration | Cached input | Cost | Concepts / edges / questions | Est. cost per chapter | Est. cost for 7 chapters |
+|---|---|---|---|---|---|---|---|
+| Kimi-K2.7 (cluster) | 20 | 6 min | – | – | 38 / 37 / 0 | – | – |
+| Kimi-K2.7 (cluster) | 67 | 28 min | – | – | 76 / 83 / 10 | – | – |
+| gpt-5.4 | 20 | 3 min | 77 % | $0.89 | 30 / 28 / 0 | ≈ $4.39 | ≈ $30.70 |
+| gpt-5.4-mini | 20 | 4 min | 93 % | $0.27 | 27 / 0 / 8 | ≈ $1.24 | ≈ $8.65 |
+
+- Each model call resends the whole conversation including all rendered slide images, so
+  the input grows with every call (1.17 M tokens for 20 slides, 5.76 M for the full chapter
+  with Kimi-K2.7). Provider prompt caching absorbs a large part of this.
+- The estimates are lower bounds: re-runs at the gates add further calls, and the input
+  grows more than linearly with the number of slides.
+- gpt-5.4-mini went through stage 2 without writing a single edge and created 8 review
+  questions that are not on the slides. Use a stronger model for graph generation.
+- The cluster does not bill per token. Kimi-K2.7 is no longer offered there.
+
+---
+
+## Limitations
+
+- Jobs are kept in memory; restarting the backend loses running jobs. The staged graph in
+  Neo4j and the workspace files remain.
+- A re-run regenerates the whole stage of the chapter instead of applying a targeted
+  correction, which costs additional tokens.
+- The counts above say nothing about the correctness of the generated nodes and edges;
+  that is what the validation gates are for.
+
+---
+
+## Project structure
 
 ```
 backend/
   app/
-    ai/          Agent-Loop, Provider-Adapter, Tools, PDF-Handling
-    api/routes/  jobs, config_meta, nodes, edges, graph, lectures
-    db/          Neo4j-Treiber-Lifecycle
-    jobs/        Job-Store, Event-Bus (SSE), Workspace
-    models/      domain, ai, jobs (pydantic)
-    pipeline/    runner, stages, cypher_loader
-    skills/      die 3 vendored Skills + registry
-    config.py    Settings
-    main.py      FastAPI-App
+    ai/           agent loop, provider adapters, tools, PDF reading
+    api/routes/   jobs, config_meta, nodes, edges, graph, lectures
+    db/           Neo4j driver lifecycle
+    jobs/         job store, event bus (SSE), workspace
+    models/       pydantic models: domain, ai, jobs
+    pipeline/     runner, stages, cypher_loader
+    skills/       the three skills (SKILL.md, scripts, references, examples) + registry
+    config.py     settings
+    main.py       FastAPI app
   Dockerfile, requirements.txt
 frontend/
   src/
-    components/  JobSetup, PipelineStepper, GraphView, ValidationPanel,
-                 NodeEditForm/EdgeEditForm, NodeInfoPopup, NextChapterPanel,
-                 ExportButtons, Neo4jUploadForm, LanguageToggle, ProgressLog,
-                 QuestionPanel
+    components/   JobSetup, PipelineStepper, ProgressLog, GraphView, NodeInfoPopup,
+                  QuestionPanel, ValidationPanel, NodeEditForm, EdgeEditForm,
+                  NextChapterPanel, ExportButtons, Neo4jUploadForm, LanguageToggle
     api/client.ts, store/pipelineStore.ts, types/graph.ts
   Dockerfile, nginx.conf, package.json
+certs/            server certificate for a self-signed cluster endpoint (git-ignored)
 docker-compose.yml
 Beispiel-Vorlesung.pdf
 ```
 
 ---
 
-## Tech-Stack
+## Tech stack
 
-**Backend:** FastAPI · async neo4j-Treiber · pydantic-settings · sse-starlette ·
-anthropic · openai · PyMuPDF · pdfplumber
+**Backend:** Python 3.11 · FastAPI · async Neo4j driver · pydantic-settings · sse-starlette ·
+anthropic · openai · httpx · PyMuPDF · pdfplumber
 
-**Frontend:** React 18 · Vite · TypeScript · zustand · neovis.js · axios
+**Frontend:** React 18 · TypeScript · Vite · zustand · neovis.js · axios
 
-**Infra:** Docker Compose · Neo4j 5 Community · nginx (Frontend + Reverse-Proxy)
+**Infrastructure:** Docker Compose · Neo4j 5 Community · nginx (static frontend and reverse proxy)
+
+Source code: https://github.com/Barbarossa2711/LectureToGraph

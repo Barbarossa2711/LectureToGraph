@@ -1,5 +1,7 @@
-"""The provider-agnostic agent loop. Runs turns against the current job
-conversation until it must pause (ask_user) or hands off (stage_complete)."""
+"""
+The provider-agnostic agent loop. It runs turns on the job's conversation until
+the model asks the user (ask_user) or finishes the stage (stage_complete).
+"""
 from __future__ import annotations
 
 from enum import Enum
@@ -16,6 +18,8 @@ Emit = Callable[[str, dict], Awaitable[None]]
 
 
 class StageOutcome(str, Enum):
+    """Why the agent loop returned."""
+
     PAUSED_QUESTION = "PAUSED_QUESTION"
     AWAIT_VALIDATION = "AWAIT_VALIDATION"
     MAX_TURNS = "MAX_TURNS"
@@ -25,6 +29,18 @@ class StageOutcome(str, Enum):
 async def run_until_pause(
     job: Job, provider: LLMProvider, system: str, emit: Emit,
 ) -> StageOutcome:
+    """
+    Run agent turns until the model asks the user, completes the stage, fails or runs out of turns.
+
+    A turn without tool calls is answered with a reminder; after more than three
+    such turns in a row the stage fails.
+
+    :param job: The job whose conversation is continued; it is updated in place.
+    :param provider: The LLM provider.
+    :param system: The system prompt of the current stage.
+    :param emit: Callback that publishes progress events to the client.
+    :return: The reason the loop stopped.
+    """
     idle_nudges = 0
 
     for _ in range(settings.agent_max_turns):
@@ -72,7 +88,7 @@ async def run_until_pause(
             if call.name == "stage_complete":
                 artifacts = call.input.get("artifacts", []) or []
                 job.last_artifacts = list(artifacts)
-                # accumulate across chapters for the download list, de-duplicated
+                # Accumulate across chapters for the download list, without duplicates.
                 existing = job.artifacts.get(job.stage.value, [])
                 job.artifacts[job.stage.value] = existing + [a for a in artifacts if a not in existing]
                 results.append(ToolResultBlock(
@@ -101,8 +117,15 @@ async def run_until_pause(
 
 
 def build_answer_message(job: Job, answers: dict) -> Message:
-    """Combine any deferred batch results with the user's answer into the
-    tool_result message that resumes the conversation."""
+    """
+    Combine the deferred tool results of the paused turn with the user's answer.
+
+    Clears the pending question on the job.
+
+    :param job: The paused job.
+    :param answers: The user's answers to the ask_user questions.
+    :return: The user message with the tool results that resumes the conversation.
+    """
     import json
     answer_block = ToolResultBlock(
         tool_use_id=job.resume_tool_use_id or "",

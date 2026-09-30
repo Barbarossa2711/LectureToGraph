@@ -3,6 +3,12 @@ import type { JobSummary, Language } from '../types/graph'
 import { setLanguage } from '../api/client'
 import { usePipelineStore } from '../store/pipelineStore'
 
+/**
+ * Switch for the language the agent uses with the user.
+ *
+ * @param job The job.
+ * @returns The switch.
+ */
 export default function LanguageToggle({ job }: { job: JobSummary }) {
   const { setJob } = usePipelineStore()
   const [busy, setBusy] = useState(false)

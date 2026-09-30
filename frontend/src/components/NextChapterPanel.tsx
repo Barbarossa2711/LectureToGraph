@@ -3,6 +3,12 @@ import type { JobSummary } from '../types/graph'
 import { addChapter, finishJob, uploadPdfs } from '../api/client'
 import { usePipelineStore } from '../store/pipelineStore'
 
+/**
+ * Panel after a finished chapter: add another chapter, optionally with a new PDF, or complete the lecture.
+ *
+ * @param job The job.
+ * @returns The panel.
+ */
 export default function NextChapterPanel({ job }: { job: JobSummary }) {
   const { refreshJob } = usePipelineStore()
   const [files, setFiles] = useState<File[]>([])

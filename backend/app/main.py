@@ -9,6 +9,12 @@ from app.api.routes import lectures, nodes, edges, graph, jobs, config_meta
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Prepare the workspace and the Neo4j driver on startup and close the driver on shutdown.
+
+    :param app: The FastAPI application being started.
+    :return: An async context that is active while the application runs.
+    """
     settings.workspace_dir.mkdir(parents=True, exist_ok=True)
     await init_driver()
     yield

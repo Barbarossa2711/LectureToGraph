@@ -20,6 +20,11 @@ const BANNERS: Partial<Record<JobStatus, { text: string; bg: string; color: stri
   FAILED: { text: '⚠️ Fehler — Details links im Status', bg: '#fee2e2', color: '#991b1b' },
 }
 
+/**
+ * Rotating hourglass shown while the model works.
+ *
+ * @returns The icon.
+ */
 function Hourglass() {
   return (
     <span style={{
@@ -31,6 +36,12 @@ function Hourglass() {
   )
 }
 
+/**
+ * Banner above the graph that tells the user what to do next.
+ *
+ * @param status The job status.
+ * @returns The banner, or null for statuses without banner.
+ */
 function StatusBanner({ status }: { status: JobStatus }) {
   const b = BANNERS[status]
   if (!b) return null
@@ -47,6 +58,11 @@ function StatusBanner({ status }: { status: JobStatus }) {
   )
 }
 
+/**
+ * Three-column layout: setup and pipeline, graph, and the panel for questions, validation or the next chapter.
+ *
+ * @returns The application.
+ */
 export default function App() {
   const { job, vizReloadKey, setJob } = usePipelineStore()
 

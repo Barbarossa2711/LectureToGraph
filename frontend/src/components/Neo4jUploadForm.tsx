@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react'
 import type { JobSummary } from '../types/graph'
 import { uploadToNeo4j, loadBundled, getBundledAccess, type BundledAccess } from '../api/client'
 
+/**
+ * Neo4j section: access to the bundled database and upload into an own database.
+ *
+ * @param job The job.
+ * @returns The section, or null before a graph exists.
+ */
 export default function Neo4jUploadForm({ job }: { job: JobSummary }) {
   if (!job.lecture_code) return null
   return (
@@ -13,7 +19,12 @@ export default function Neo4jUploadForm({ job }: { job: JobSummary }) {
   )
 }
 
-// ── A) the bundled Docker Neo4j ──────────────────────────────────────────
+/**
+ * Connection data of the bundled Docker Neo4j and a button to load the graph into it again.
+ *
+ * @param job The job.
+ * @returns The section.
+ */
 function BundledSection({ job }: { job: JobSummary }) {
   const [open, setOpen] = useState(true)
   const [access, setAccess] = useState<BundledAccess | null>(null)
@@ -67,7 +78,12 @@ function BundledSection({ job }: { job: JobSummary }) {
   )
 }
 
-// ── B) the user's own Neo4j (Desktop / their own Docker) ─────────────────
+/**
+ * Form to upload the graph into the user's own Neo4j, e.g. Neo4j Desktop.
+ *
+ * @param job The job.
+ * @returns The section.
+ */
 function OwnDbSection({ job }: { job: JobSummary }) {
   const [open, setOpen] = useState(false)
   const [uri, setUri] = useState('bolt://127.0.0.1:7687')

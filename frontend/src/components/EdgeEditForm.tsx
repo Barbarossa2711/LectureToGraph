@@ -4,6 +4,11 @@ import type { EdgeType } from '../types/graph'
 import { createEdge, deleteEdge } from '../api/client'
 import { usePipelineStore } from '../store/pipelineStore'
 
+/**
+ * Form to add or delete an edge by source id, target id and type.
+ *
+ * @returns The form.
+ */
 export default function EdgeEditForm() {
   const bumpViz = usePipelineStore((s) => s.bumpViz)
   const [source, setSource] = useState('')
