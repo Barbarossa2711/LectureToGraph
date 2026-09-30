@@ -17,6 +17,11 @@ depend on each other requires domain expertise. LectureToGraph therefore does no
 full automation. It follows the principle of **AI-assisted construction under expert
 supervision**: the model proposes, the lecturer decides.
 
+The version described in the thesis is tagged
+[`v1.0-lecture2graph`](https://github.com/Barbarossa2711/LectureToGraph/tree/v1.0-lecture2graph).
+The project is open for further development, e.g. as a bachelor's thesis; see
+[Status and future work](#status-and-future-work) for starting points.
+
 ---
 
 ## Contents
@@ -32,9 +37,10 @@ supervision**: the model proposes, the lecturer decides.
 - [Configuration](#configuration)
 - [API overview](#api-overview)
 - [Runtime and cost](#runtime-and-cost)
-- [Limitations](#limitations)
+- [Status and future work](#status-and-future-work)
 - [Project structure](#project-structure)
 - [Tech stack](#tech-stack)
+- [License](#license)
 
 ---
 
@@ -439,14 +445,30 @@ re-runs:
 
 ---
 
-## Limitations
+## Status and future work
 
-- Jobs are kept in memory; restarting the backend loses running jobs. The staged graph in
-  Neo4j and the workspace files remain.
-- A re-run regenerates the whole stage of the chapter instead of applying a targeted
-  correction, which costs additional tokens.
-- The counts above say nothing about the correctness of the generated nodes and edges;
-  that is what the validation gates are for.
+LectureToGraph was built as a supporting tool of the thesis, not as its main subject, and
+should be regarded as a first prototype. It was used to build the domain model of one
+lecture, *Big-Data-Technologien*. The following points are known limitations and natural
+starting points for further work:
+
+- **Targeted corrections.** A re-run regenerates the whole stage of the chapter, even if
+  the lecturer only wants to fix a few nodes or edges. Applying feedback as a targeted
+  correction would save model calls and cost.
+- **Input size and cost.** Every model call resends the whole conversation including all
+  rendered slide images, so the input grows more than linearly with the number of slides
+  (see [Runtime and cost](#runtime-and-cost)). Summarising or dropping images that were
+  already processed would reduce cost and runtime.
+- **Quality evaluation.** The thesis counts the generated concepts, edges and questions but
+  does not assess their correctness. Comparing the output with a reference graph built by
+  lecturers, per model and per stage, would show how much the validation gates must catch.
+- **Persistent jobs.** Jobs are kept in memory; restarting the backend loses running jobs.
+  The staged graph in Neo4j and the workspace files remain.
+- **More lectures.** Only one lecture has been modelled so far. Other subjects, slide styles
+  and languages may need adjustments to the skills.
+- **PDF rendering licence.** PyMuPDF is licensed under AGPL-3.0 (see [License](#license)).
+  Replacing it with a permissively licensed renderer such as `pypdfium2` only affects
+  `backend/app/ai/pdf.py`.
 
 ---
 
@@ -489,3 +511,15 @@ anthropic · openai · httpx · PyMuPDF · pdfplumber
 **Infrastructure:** Docker Compose · Neo4j 5 Community · nginx (static frontend and reverse proxy)
 
 Source code: https://github.com/Barbarossa2711/LectureToGraph
+
+---
+
+## License
+
+LectureToGraph is released under the [MIT License](LICENSE), © 2026 Barbarossa2711.
+
+Third-party dependencies keep their own licences. Note that **PyMuPDF**, which renders the
+slide images, is licensed under **AGPL-3.0** (or a commercial licence from Artifex).
+Running or distributing LectureToGraph together with PyMuPDF therefore has to comply with
+the AGPL-3.0 for that component. The other dependencies use permissive licences (MIT, BSD,
+Apache-2.0); Neo4j Community Edition (GPL-3.0) runs as a separate server.
