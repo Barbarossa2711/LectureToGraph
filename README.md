@@ -68,7 +68,9 @@ The project is open for further development, e.g. as a bachelor's thesis; see
   only). Manual edits can be written back to a Cypher file at any time.
 - **Neo4j upload.** Load the graph into the bundled Neo4j or into your own instance
   (Neo4j Desktop, your own Docker) with a credentials form.
-- **German or English.** The agent asks its questions in German by default; switchable.
+- **Language.** The user interface is currently available in German only. The agent's
+  questions and summaries are in German by default and can be switched to English. Graph
+  content such as concept names and question texts keeps the language of the lecture slides.
 - **Resumable.** Jobs run asynchronously; progress arrives via server-sent events and a
   reconnecting browser restores the current state.
 
@@ -492,6 +494,8 @@ starting points for further work:
   The staged graph in Neo4j and the workspace files remain.
 - **More lectures.** Only one lecture has been modelled so far. Other subjects, slide styles
   and languages may need adjustments to the skills.
+- **Internationalisation.** The UI texts are hard-coded in German. Extracting them into
+  translation files would make the tool usable for English-speaking lecturers.
 - **PDF rendering licence.** PyMuPDF is licensed under AGPL-3.0 (see [License](#license)).
   Replacing it with a permissively licensed renderer such as `pypdfium2` only affects
   `backend/app/ai/pdf.py`.
