@@ -23,3 +23,8 @@ dist/
 
 Claude outputs
 masterarbeit.pdf
+
+# Certificates and keys
+*.pem
+*.key
+*.crt
