@@ -195,9 +195,9 @@ A `:Slide` node has exactly these eight properties:
 
 | property      | type   | example                                              |
 | ------------- | ------ | ---------------------------------------------------- |
-| `id`          | string | `BDT_CH06_SL34`  (`<CODE>_CHNN_SL<pageNr>`)       |
+| `id`          | string | `BDT_CH06_SL34`  (`<CODE>_CHNN_SL<pageNumber>`)       |
 | `title`       | string | `Topics und Partitionen im Cluster (mehrere Broker)` |
-| `pageNr`  | int    | `34`                                                 |
+| `pageNumber`  | int    | `34`                                                 |
 | `source`      | string | `06-data-streams.pdf`                                |
 | `lecture`     | string | `BDT`                                                |
 | `chapter`     | string | `BDT_CH06`                                            |
@@ -225,7 +225,7 @@ EVERY property MUST be prefixed with `s.`; every statement ends with `;`:
 CREATE CONSTRAINT IF NOT EXISTS FOR (s:Slide) REQUIRE s.id IS UNIQUE;
 MERGE (s:Slide {id:'BDT_CH06_SL34'})
   SET s.title='Topics und Partitionen im Cluster (mehrere Broker)',
-      s.pageNr=34, s.source='06-data-streams.pdf', s.lecture='BDT',
+      s.pageNumber=34, s.source='06-data-streams.pdf', s.lecture='BDT',
       s.chapter='BDT_CH06', s.chapterIndex=6, s.chapterName='Data Streams & Zeitreihen';
 MATCH (s:Slide {id:'BDT_CH06_SL34'}), (c:Concept {id:'BDT_CH06_T01_C01'}) MERGE (s)-[:COVERS]->(c);
 ```

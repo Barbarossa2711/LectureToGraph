@@ -195,8 +195,8 @@ typed edges between concepts express their didactic order.
 | `Topic` | `id`, `index`, `name` | A topic within a chapter. |
 | `Subtopic` | `id`, `name` | Optional grouping below a topic; may nest recursively. |
 | `Concept` | `id`, `name` | Finest granularity: a concept or fact students should learn. Concepts carry **no** `index`; their order is defined only by the concept edges. |
-| `Slide` | `id`, `title`, `pageNr`, `source`, `lecture`, `chapter`, `chapterIndex`, `chapterName` | A slide that presents at least one concept. `source` is the PDF file name. Used for retrieval of the slide content. |
-| `Question` | `id`, `text`, `index`, `chapter`, `pageNr`, `source`, `note` (optional) | A review question of the lecture, verbatim, with its position in the slides. |
+| `Slide` | `id`, `title`, `pageNumber`, `source`, `lecture`, `chapter`, `chapterIndex`, `chapterName` | A slide that presents at least one concept. `source` is the PDF file name. Used for retrieval of the slide content. |
+| `Question` | `id`, `text`, `index`, `chapter`, `pageNumber`, `source`, `note` (optional) | A review question of the lecture, verbatim, with its position in the slides. |
 
 ### Edges
 
@@ -245,7 +245,7 @@ BDT_CH01                     Chapter
 BDT_CH01_T03                 Topic
 BDT_CH01_T01_S02             Subtopic
 BDT_CH01_T01_S02_C01         Concept
-BDT_CH06_SL34                Slide    (<CODE>_CHnn_SL<pageNr>)
+BDT_CH06_SL34                Slide    (<CODE>_CHnn_SL<pageNumber>)
 BDT_CH01_Q12                 Question
 ```
 

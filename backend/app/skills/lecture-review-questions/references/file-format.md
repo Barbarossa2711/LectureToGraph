@@ -13,7 +13,7 @@ id scheme to whatever the domain model uses.
 CREATE CONSTRAINT question_id IF NOT EXISTS FOR (n:Question) REQUIRE n.id IS UNIQUE;
 
 // --- Frage-Knoten ---
-MERGE (n:Question {id:'BDT_CHN_Q01'}) SET n.text='<verbatim question text>', n.index=1, n.chapter='BDT_CHN', n.pageNr=75, n.source='<chapter>.pdf';
+MERGE (n:Question {id:'BDT_CHN_Q01'}) SET n.text='<verbatim question text>', n.index=1, n.chapter='BDT_CHN', n.pageNumber=75, n.source='<chapter>.pdf';
 // ... one MERGE per question ...
 
 // --- HAS_QUESTION (one block links every question of this chapter to the chapter) ---
@@ -32,7 +32,7 @@ Use the variable names `n` (question node), `ch`/`q` (HAS_QUESTION), `q`/`c` (TE
 ## Worked example (compound question, multiple TESTS)
 
 ```cypher
-MERGE (n:Question {id:'BDT_CH01_Q12'}) SET n.text='Wie funktioniert Block-Nested-Loop-Join, Sort-Merge-Join, Hash-Join? Wie hoch sind die Aufwände?', n.index=12, n.chapter='BDT_CH01', n.pageNr=76, n.source='01-arch-rel-anfragen.pdf';
+MERGE (n:Question {id:'BDT_CH01_Q12'}) SET n.text='Wie funktioniert Block-Nested-Loop-Join, Sort-Merge-Join, Hash-Join? Wie hoch sind die Aufwände?', n.index=12, n.chapter='BDT_CH01', n.pageNumber=76, n.source='01-arch-rel-anfragen.pdf';
 ...
 MATCH (q:Question {id:'BDT_CH01_Q12'}), (c:Concept {id:'BDT_CH01_T05_S01_C02'}) MERGE (q)-[:TESTS]->(c);  // Block Nested Loop Join
 MATCH (q:Question {id:'BDT_CH01_Q12'}), (c:Concept {id:'BDT_CH01_T05_S01_C03'}) MERGE (q)-[:TESTS]->(c);  // Sort-Merge Join
@@ -45,7 +45,7 @@ When a question must point outside its chapter (approved exception), add a `note
 clear comment:
 
 ```cypher
-MERGE (n:Question {id:'BDT_CH07_Q11'}) SET n.text='Welche Herausforderungen gibt es bei Vektordatenbank-Systemen?', n.index=11, n.chapter='BDT_CH07', n.pageNr=72, n.source='07-data-engineering.pdf', n.note='Vektor-Topic in CH07 entfernt; TESTS verweisen kapitelübergreifend auf CH03';
+MERGE (n:Question {id:'BDT_CH07_Q11'}) SET n.text='Welche Herausforderungen gibt es bei Vektordatenbank-Systemen?', n.index=11, n.chapter='BDT_CH07', n.pageNumber=72, n.source='07-data-engineering.pdf', n.note='Vektor-Topic in CH07 entfernt; TESTS verweisen kapitelübergreifend auf CH03';
 ...
 MATCH (q:Question {id:'BDT_CH07_Q11'}), (c:Concept {id:'BDT_CH03_T03_S04_C02'}) MERGE (q)-[:TESTS]->(c);  // Curse of Dimensionality (CH03) [kapitelübergreifend]
 ```

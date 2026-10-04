@@ -6,7 +6,7 @@ Hard checks (exit 1 on failure):
   - Slide ids are unique
   - every COVERS target is a *defined* :Concept node (no typos / removed nodes)
   - every Slide carries all eight required properties
-    (id, title, pageNr, source, lecture, chapter, chapterIndex, chapterName)
+    (id, title, pageNumber, source, lecture, chapter, chapterIndex, chapterName)
   - every :Concept of a chapter that has slides is COVERED by at least one slide
     (no chapter concept may be left without a source slide)
 
@@ -30,7 +30,7 @@ COVERS = re.compile(
     r"MERGE \(\w+\)-\[:COVERS\]->\(\w+\)"
 )
 
-REQUIRED = ["id", "title", "pageNr", "source",
+REQUIRED = ["id", "title", "pageNumber", "source",
             "lecture", "chapter", "chapterIndex", "chapterName"]
 
 
